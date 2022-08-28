@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt
 
 import parse_tracklet_xml  
 
-basedir = 'data'
-
 colors = {
         'Car': 'b',
         'Tram': 'r',
@@ -25,8 +23,8 @@ axes_limits = [
 axes_str = ['X', 'Y', 'Z']
 
 
-def load_dataset(date, drive, calibrated=False, frame_range=None):
-    dataset = pykitti.raw(basedir, date, drive)
+def load_dataset(datadir, date, drive, calibrated=False, frame_range=None):
+    dataset = pykitti.raw(datadir, date, drive)
 
     if calibrated:
         dataset.load_calib()
