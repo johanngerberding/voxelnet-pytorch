@@ -6,6 +6,10 @@ Take a look at the Kitti Dataset, especially the lidar and camera data and have 
 
 ![Four camera plots](assets/images.png)
 
+## 3D Bounding Box Visualization
+
+![3D Bounding Box Visualization](assets/3d_bboxes.gif)
+
 ## Lidar Visualization
 
 ![Lidar Pointcloud with bounding boxes](assets/pcl_data.gif)

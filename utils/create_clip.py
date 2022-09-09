@@ -1,7 +1,6 @@
 import argparse
 import os 
 import shutil 
-from http.cookiejar import DefaultCookiePolicy
 from moviepy.editor import ImageSequenceClip 
 from visualize import (
     draw_box, 

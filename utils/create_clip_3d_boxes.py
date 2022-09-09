@@ -1,13 +1,11 @@
 import os 
 import argparse
-from tkinter import W
-import pykitti 
 import numpy as np 
-import matplotlib.pyplot as plt 
-import utils.parse_tracklet_xml as parse_tracklet_xml
+import parse_tracklet_xml
 import cv2
+from moviepy.editor import ImageSequenceClip
 
-from utils.visualize import load_dataset, load_tracklets_for_frames
+from visualize import load_dataset
 
 colors = {
     'Car': 'b',
@@ -165,10 +163,10 @@ def draw_3d_boxes_img(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--base_dir', type=str, default='data')
+    parser.add_argument('--base_dir', type=str, default='/home/johann/dev/kitti-data-exploration/data')
     parser.add_argument('--date', type=str, default='2011_09_26')
     parser.add_argument('--drive', type=str, default='0001')
-    
+    parser.add_argument('--format', type=str, default='gif') 
     parser.add_argument('--out', type=str, default='3d_bboxes.mp4') 
     parser.add_argument('--fps', type=int, default=10)    
     args = parser.parse_args()
@@ -208,26 +206,36 @@ def main():
         for i in range(len(list(dataset.cam2)))
     ]
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    size = (imgs[0].shape[1], imgs[0].shape[0]) 
-    print(size) 
-    out = cv2.VideoWriter(
-        args.out, 
-        fourcc, 
-        args.fps, 
-        size,
-    )
+    if args.format == 'mp4':
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        size = (imgs[0].shape[1], imgs[0].shape[0]) 
+        print(size) 
+        out = cv2.VideoWriter(
+            args.out, 
+            fourcc, 
+            args.fps, 
+            size,
+        )
 
-    for img in imgs:
-        out.write(img)
-        cv2.imshow("Frame", img) 
-        key = cv2.waitKey(1) & 0xFF 
-        if key == ord("q"):
-            break 
-    
-    out.release()
-    cv2.destroyAllWindows()
+        for img in imgs:
+            out.write(img)
+            cv2.imshow("Frame", img) 
+            key = cv2.waitKey(1) & 0xFF 
+            if key == ord("q"):
+                break 
+        
+        out.release()
+        cv2.destroyAllWindows()
 
+    elif args.format == 'gif':
+        if not args.out.endswith('gif'):
+            outpath = args.out[:-4] + ".gif"
+        else: 
+            outpath = args.out
+        clip = ImageSequenceClip(imgs, fps=args.fps)
+        clip.write_gif(outpath, fps=args.fps)
+    else: 
+        raise ValueError("Choose between mp4 and gif as format.")
 
 
 if __name__ == "__main__":

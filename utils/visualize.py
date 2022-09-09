@@ -1,8 +1,7 @@
 import numpy as np 
 import pykitti 
 import matplotlib.pyplot as plt 
-
-import utils.parse_tracklet_xml as parse_tracklet_xml
+import parse_tracklet_xml
 
 
 colors = {
