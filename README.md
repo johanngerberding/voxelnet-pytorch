@@ -14,6 +14,11 @@ Take a look at the Kitti Dataset, especially the lidar and camera data and have 
 
 ![Lidar Pointcloud with bounding boxes](assets/pcl_data.gif)
 
+
+## Detection (WIP) 
+
+Implementations of a couple different 3D Object Detection Papers.
+
 ## References 
 
 Here the helpful stuff I used:
