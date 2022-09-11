@@ -19,6 +19,12 @@ Take a look at the Kitti Dataset, especially the lidar and camera data and have 
 
 Implementations of a couple different 3D Object Detection Papers.
 
+
+## TODOs 
+
+- add different color per class for 3d bounding box visualization
+- how to crop point cloud to only show points inside the camera frame? 
+
 ## References 
 
 Here the helpful stuff I used:
