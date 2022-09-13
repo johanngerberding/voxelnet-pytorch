@@ -8,13 +8,13 @@ from moviepy.editor import ImageSequenceClip
 from visualize import load_dataset
 
 colors = {
-    'Car': 'b',
-    'Tram': 'r',
-    'Cyclist': 'g',
-    'Van': 'c',
-    'Truck': 'm',
-    'Pedestrian': 'y',
-    'Sitter': 'k',
+    'Car': (0, 0, 255),
+    'Tram': (255, 0, 0),
+    'Cyclist': (0, 153, 0),
+    'Van': (255, 0, 255),
+    'Truck': (153, 51, 255),
+    'Pedestrian': (255, 255, 0),
+    'Sitter': (0, 0, 0),
 }
 
 
@@ -128,8 +128,8 @@ def tracklets_velo2cam_2d(
 def draw_3d_boxes_img(
     dataset, 
     frame_id, 
-    tracklets_2d_boxes, 
-    color=(128, 255, 128), 
+    tracklets_2d_boxes,
+    tracklets_2d_boxes_types, 
     thickness=1,
 ):
     
@@ -149,14 +149,15 @@ def draw_3d_boxes_img(
     
     cam2_gen = np.asarray(dataset.get_cam2(frame_id))
     boxes = tracklets_2d_boxes.get(frame_id)
-    
-    for box in boxes:
+    box_types = tracklets_2d_boxes_types.get(frame_id) 
+
+    for i, box in enumerate(boxes):
         for connection in connections:
             start = box[connection[0]]
             end = box[connection[1]]
             start = (int(start[0]), int(start[1]))
             end = (int(end[0]), int(end[1]))
-            cam2_gen = cv2.line(cam2_gen, start, end, color, thickness)
+            cam2_gen = cv2.line(cam2_gen, start, end, colors[box_types[i]], thickness)
     
     return cam2_gen
 
@@ -202,7 +203,7 @@ def main():
     )
 
     imgs = [
-        draw_3d_boxes_img(dataset, i, tracklets_2d_boxes) 
+        draw_3d_boxes_img(dataset, i, tracklets_2d_boxes, tracklets_2d_boxes_types) 
         for i in range(len(list(dataset.cam2)))
     ]
 
