@@ -63,28 +63,21 @@ def align_img_and_velo(img_path: str, pc_path: str, calib_path: str) -> np.ndarr
     #img = cv2.imread(img_path)
     img = Image.open(img_path) 
     img = np.asarray(img)
-    print(img.shape) 
+    
     points = load_velo_points(pc_path)
     P, Tr_velo_to_cam, R_cam_to_rect = load_calib(calib_path)
-    print(P)
-    print(Tr_velo_to_cam)
-    print(R_cam_to_rect)
-    print("-"*25)
+    
     points_3d, idxs = prepare_velo_points(points)
     points_3d_org = points_3d.copy()
     reflectances = points[idxs, 3]
-    print(reflectances.shape)
+    
     points_3d, points_2d_normed, idx = project_velo_to_img(points_3d, Tr_velo_to_cam, R_cam_to_rect, P)
     reflectances = reflectances[idx]
-    print(points_3d.shape)
-    print(points_2d_normed.shape)
-    print(points_2d_normed[:, 1]) 
-    print("-"*25)
+    
     assert reflectances.shape[0] == points_3d.shape[1] == points_2d_normed.shape[1]
 
     rows, cols = img.shape[:2]
-    print(rows)
-    print(cols) 
+    
     pts = []
     for i in range(points_2d_normed.shape[1]):
         col = int(np.round(points_2d_normed[0, i]))
@@ -157,13 +150,9 @@ def main():
         assert os.path.isfile(calib_path)
 
         points = align_img_and_velo(img_path, pcl_path, calib_path)
-        print(points.shape)
-        if points.shape[0] > 0:
-            print(f"Good file: {frame}.bin") 
-            break
         outname = args.pc_root + f"/{str(frame).zfill(6)}.bin"
 
-        #points[:, :4].astype('float32').tofile(outname)
+        points[:, :4].astype('float32').tofile(outname)
         print(f"Saved: {outname}")
 
 
