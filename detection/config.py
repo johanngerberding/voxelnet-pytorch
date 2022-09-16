@@ -8,7 +8,7 @@ _C.SYSTEM.NUM_GPUS = 1
 _C.SYSTEM.NUM_WORKERS = 4
 
 _C.DATA = CN()
-_C.DATA.DIR= "/data/kitti/3d_vision" 
+_C.DATA.DIR= "/data/kitti/3d_vision/training" 
 
 _C.OBJECT = CN()
 _C.OBJECT.NAME = "Car"

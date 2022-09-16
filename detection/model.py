@@ -1,11 +1,9 @@
 import torch 
 import torch.nn as nn 
 
-voxel_pcl = 35
-input_depth = int((1 - -3 ) / 0.4) 
-input_height = int((40 - -40) / 0.2) 
-input_width = int((70.4 - 0) / 0.2) 
+from config import get_cfg_defaults
 
+cfg = get_cfg_defaults()
 
 class VFELayer(nn.Module):
     def __init__(self, cin: int, cout: int):
@@ -13,7 +11,7 @@ class VFELayer(nn.Module):
 
         self.in_channels = cin 
         self.out_channels = cout
-        self.local_agg_features = cout / 2 
+        self.local_agg_features = cout // 2 
 
         self.fcn = nn.Sequential(
             nn.Linear(self.in_channels, self.local_agg_features),
@@ -26,7 +24,7 @@ class VFELayer(nn.Module):
         temp = self.fcn(inputs).transpose(1,2)
         pointwise_input = self.bn(temp).transpose(1,2) 
         agg, _ = torch.max(pointwise_input, dim=1, keepdim=True)
-        repeat = agg.expand(-1, voxel_pcl, -1)
+        repeat = agg.expand(-1, cfg.OBJECT.POINTS_PER_VOXEL, -1)
         concat = torch.cat([pointwise_input, repeat], dim=2)
         mask = mask.expand(-1, -1, 2 * self.local_agg_features) 
         concat = concat * mask.float()
@@ -40,13 +38,14 @@ class FeatureLearningNet(nn.Module):
         self.vfe_2 = VFELayer(32, 128)
     
 
-    def forward(self, feature, number, coordinate):
+    def forward(self, feature, coordinate):
         bs = len(feature)
-        feature = torch.cat(feature, dim=0)
+        feature = torch.cat(feature)
         print(feature.size())
-        coordinate = torch.cat(coordinate, dim=0)
+        coordinate = torch.cat(coordinate)
         print(coordinate.size())
         vmax, _ = torch.max(feature, dim=2, keepdim=True)
+        print(vmax.size()) 
         mask = (vmax != 0) 
         print(mask.shape)
         x = self.vfe_1(feature, mask)
@@ -56,8 +55,9 @@ class FeatureLearningNet(nn.Module):
         print(x.size())
 
         voxelwise, _ = torch.max(x, dim=1)
+        print(voxelwise.size())
         outs = torch.sparse.FloatTensor(coordinate.t(), voxelwise, torch.Size(
-            [bs, input_depth, input_height, input_width, 128]
+            [bs, cfg.OBJECT.DEPTH, cfg.OBJECT.HEIGHT, cfg.OBJECT.WIDTH, 128]
         ))
 
         outs = outs.to_dense()
@@ -66,8 +66,10 @@ class FeatureLearningNet(nn.Module):
 
 
 def test():
-    pcl_path = ""
-
+    from dataset import KITTIDataset
+     
+    dataset = KITTIDataset(cfg.DATA.DIR, False)
+    print(len(dataset)) 
 
 if __name__ == "__main__":
     test()
