@@ -3,7 +3,8 @@ import numpy as np
 
 def pcl_to_voxels(pcl, target: str, verbose: bool = False) -> dict:
     """Preprocess point cloud. Exclude points out of defined range, 
-    create an index for the voxels and 
+    create an index for the voxels and the voxel features as described in the 
+    paper section 2.1.1.  
 
     Args:
         pcl (np.ndarray): Velodyne point cloud 
@@ -13,8 +14,6 @@ def pcl_to_voxels(pcl, target: str, verbose: bool = False) -> dict:
     Returns:
         dict: Voxel dict containing features, unique voxels and number of points per voxel 
     """     
-    # input = (n, 4)
-    # output = voxel_dict
 
     if target == 'Car':
         voxel_size = np.array([0.4, 0.2, 0.2], dtype=np.float32)
@@ -95,11 +94,13 @@ def pcl_to_voxels(pcl, target: str, verbose: bool = False) -> dict:
     return voxel_dict
 
 
-"""def test():
+"""
+def test():
     pcl_path = "/data/kitti/3d_vision/training/velodyne/000009.bin"
     pcl = np.fromfile(pcl_path, dtype=np.float32).reshape(-1, 4)
     pcl_preproc = pcl_to_voxels(pcl, "Car", True)
 
 
 if __name__ == "__main__":
-    test()"""
+    test()
+"""
