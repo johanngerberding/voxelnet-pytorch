@@ -38,24 +38,25 @@ class FeatureLearningNet(nn.Module):
         self.vfe_2 = VFELayer(32, 128)
     
 
-    def forward(self, feature, coordinate):
+    def forward(self, feature: list, coordinate: list):
         bs = len(feature)
-        feature = torch.cat(feature)
-        print(feature.size())
-        coordinate = torch.cat(coordinate)
-        print(coordinate.size())
+        print(f"Batch size: {bs}")
+        feature = torch.cat(feature, dim=0)
+        print(f"Feature size: {feature.size()}")
+        coordinate = torch.cat(coordinate, dim=0)
+        print(f"Coordinate shape: {coordinate.size()}")
         vmax, _ = torch.max(feature, dim=2, keepdim=True)
-        print(vmax.size()) 
+        print(f"Vmax shape: {vmax.size()}") 
         mask = (vmax != 0) 
-        print(mask.shape)
+        print(f"Mask shape: {mask.shape}")
         x = self.vfe_1(feature, mask)
-        print(x.size())
+        print(f"Shape after first layer: {x.size()}")
 
         x = self.vfe_2(x, mask)
-        print(x.size())
+        print(f"Shape after second layer: {x.size()}")
 
         voxelwise, _ = torch.max(x, dim=1)
-        print(voxelwise.size())
+        print(f"Voxelwise shape: {voxelwise.size()}")
         outs = torch.sparse.FloatTensor(coordinate.t(), voxelwise, torch.Size(
             [bs, cfg.OBJECT.DEPTH, cfg.OBJECT.HEIGHT, cfg.OBJECT.WIDTH, 128]
         ))
@@ -67,9 +68,32 @@ class FeatureLearningNet(nn.Module):
 
 def test():
     from dataset import KITTIDataset
-     
+    import numpy as np  
     dataset = KITTIDataset(cfg.DATA.DIR, False)
-    print(len(dataset)) 
+    print(len(dataset))
+
+    feature_learning_net = FeatureLearningNet()
+
+    #TODO iterate through dataset and prepare input for model
+
+    for img, pcl, labels, voxels in dataset:
+        feature = voxels['feature_buffer']   
+        print(feature.shape) 
+        coordinate = voxels['coordinate_buffer'] 
+        print(coordinate.shape)
+        print(coordinate[0, :]) 
+        feature = [torch.tensor(feature)]
+        coordinate = [
+            torch.from_numpy(
+                np.pad(coordinate, ((0,0), (1,0)), mode='constant', constant_values=0)
+            )
+        ]
+        print(f"coordinate shape after padding: {coordinate[0].size()}") 
+        print(coordinate[0][0, :]) 
+        out = feature_learning_net(feature, coordinate) 
+        print(out.size()) 
+        break  
+
 
 if __name__ == "__main__":
     test()
