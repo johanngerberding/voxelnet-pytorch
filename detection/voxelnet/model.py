@@ -1,3 +1,4 @@
+from tkinter import W
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F 
@@ -159,6 +160,97 @@ class DeConv2d(nn.Module):
         if self.bn: 
             x = self.batch_norm(x)
         return F.relu(x) 
+
+
+class MiddleConvNet(nn.Module):
+    def __init__(
+        self, 
+        alpha: float = 1.5, 
+        beta: int = 1, 
+        sigma: int = 3, 
+        training: bool = True, 
+        name: str = '',
+    ):
+        super(MiddleConvNet, self).__init__()
+        
+        self.middle_layer = nn.Sequential(
+            ConvMD(3, 128, 64, 3, (2, 1, 1,), (1, 1, 1)),
+            ConvMD(3, 64, 64, 3, (1, 1, 1,), (0, 1, 1)),
+            ConvMD(3, 64, 64, 3, (2, 1, 1,), (1, 1, 1)),
+        )
+
+        if cfg.OBJECT.NAME == 'Car':
+            self.block1 = nn.Sequential(
+                ConvMD(2, 128, 128, 3, (2, 2), (1, 1)),
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+            )
+        else: 
+            self.block1 = nn.Sequential(
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+                ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+            )
+
+        self.deconv1 = DeConv2d(128, 256, 3, (1, 1), (1, 1))
+
+        self.block2 = nn.Sequential(
+            ConvMD(2, 128, 128, 3, (2, 2), (1, 1)),
+            ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+            ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+            ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+            ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+            ConvMD(2, 128, 128, 3, (1, 1), (1, 1)),
+        )
+
+        self.deconv2 = DeConv2d(128, 256, 2, (2, 2), (0, 0))
+
+        self.block3 = nn.Sequential(
+            ConvMD(2, 128, 256, 3, (2, 2), (1, 1)),
+            ConvMD(2, 256, 256, 3, (1, 1), (1, 1)),
+            ConvMD(2, 256, 256, 3, (1, 1), (1, 1)),
+            ConvMD(2, 256, 256, 3, (1, 1), (1, 1)),
+            ConvMD(2, 256, 256, 3, (1, 1), (1, 1)),
+            ConvMD(2, 256, 256, 3, (1, 1), (1, 1)),
+        )
+
+        self.deconv3 = DeConv2d(256, 256, 2, (2, 2), (0, 0))
+
+        self.prob_conv = ConvMD(2, 768, 2, 1, (1, 1), (0, 0), bn=False, activation=False)
+        self.reg_conv = ConvMD(2, 768, 14, 1, (1, 1), (0, 0), bn=False, activation=False)
+        self.output_shape = [cfg.OBJECT.FEATURE_HEIGHT, cfg.OBJECT.FEATURE_WIDTH]
+
+
+    def forward(self, x):
+        batch_size, _, height, width, _ = x.shape 
+        x = x.permute(0, 4, 1, 2, 3) # (B, D, H, W, C) -> (B, C, D, H, W)
+        
+        x = self.middle_layer(x)
+        x = x.view(batch_size, -1, height, width)
+        x = self.block1(x) 
+        tmp_deconv_1 = self.deconv1(x)
+
+        x = self.block2(x)
+        tmp_deconv_2 = self.deconv2(x)
+
+        x = self.block3(x)
+        tmp_deconv_3 = self.deconv3(x)
+
+        x = torch.cat(
+            [tmp_deconv_3, tmp_deconv_2, tmp_deconv_1], dim=1,
+        )
+
+        # probability score map (batch, 2, 200/100, 176/120)
+        probs_map = self.prob_conv(x) 
+
+        # regression map (batch, 14, 200/100, 176/120) 
+        reg_map = self.reg_conv(x)
+
+        return torch.sigmoid(probs_map), reg_map 
 
 
 class RPN3D(nn.Module):
