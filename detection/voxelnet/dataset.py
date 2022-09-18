@@ -48,11 +48,11 @@ class KITTIDataset(data.Dataset):
 
 
 # custom batching function
-def collate_fn(parts: list) -> tuple:
-    """_summary_
+def collate_fn(parts: tuple) -> tuple:
+    """Batching.
 
     Args:
-        parts (_type_): _description_
+        parts (tuple): _description_
 
     Returns:
         tuple: Labels, Voxel-Features, Voxel-Numbers, 
@@ -66,12 +66,12 @@ def collate_fn(parts: list) -> tuple:
     voxel_features, voxel_numbers, voxel_coordinates = prepare_voxel(voxel) 
     
     outs = (
-        np.array(label),
+        np.array(label, dtype=object),
         [torch.from_numpy(f) for f in voxel_features], 
-        np.array(voxel_numbers),
+        np.array(voxel_numbers, dtype=object),
         [torch.from_numpy(c) for c in voxel_coordinates],
-        np.array(rgb),
-        np.array(raw_lidar),
+        np.array(rgb, dtype=object),
+        np.array(raw_lidar, dtype=object),
     )
     return outs 
 
@@ -116,6 +116,19 @@ def test():
     print(pcl.shape)
     print(len(labels))
     print(voxels.keys())
+
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
+
+    for data in dataloader:
+        print(type(data)) 
+        label, voxel_features, voxel_numbers, voxel_coordinates, rgb, raw_lidar = data 
+        print(type(label)) 
+        print(len(voxel_coordinates))
+        print(len(voxel_features)) 
+        break
+
 
 
 if __name__ == "__main__":

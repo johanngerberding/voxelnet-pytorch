@@ -1,5 +1,6 @@
 import torch 
 import torch.nn as nn 
+import torch.nn.functional as F 
 
 from config import get_cfg_defaults
 
@@ -57,6 +58,7 @@ class FeatureLearningNet(nn.Module):
 
         voxelwise, _ = torch.max(x, dim=1)
         print(f"Voxelwise shape: {voxelwise.size()}")
+        # use pytorch sparse tensor for efficient memory usage 
         outs = torch.sparse.FloatTensor(coordinate.t(), voxelwise, torch.Size(
             [bs, cfg.OBJECT.DEPTH, cfg.OBJECT.HEIGHT, cfg.OBJECT.WIDTH, 128]
         ))
@@ -64,6 +66,109 @@ class FeatureLearningNet(nn.Module):
         outs = outs.to_dense()
 
         return outs
+
+
+
+class ConvMD(nn.Module):
+    def __init__(
+        self, 
+        input_dim: int, 
+        cin: int, 
+        cout: int, 
+        kernel_size: int, 
+        stride: int, 
+        padding: int, 
+        bn, 
+        activation,
+    ):
+        super(ConvMD, self).__init__()
+        self.input_dim = input_dim
+        self.cin = cin 
+        self.cout = cout 
+        self.kernel_size = kernel_size 
+        self.stride = stride  
+        self.padding = padding 
+        self.bn = bn 
+        self.activation = activation 
+
+        if self.input_dim == 2:
+            self.conv = nn.Conv2d(
+                self.cin, 
+                self.cout, 
+                self.kernel_size, 
+                self.stride, 
+                self.padding,
+            )
+            if self.bn: 
+                self.batch_norm = nn.BatchNorm2d(self.cout)
+        
+        elif self.input_dim == 3:
+            self.conv = nn.Conv3d(
+                self.cin,
+                self.cout,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+            )
+            if self.bn: 
+                self.batch_norm = nn.BatchNorm3d(self.cout)
+
+        else: 
+            raise ValueError("Choose between 2D and 3D input.")
+
+
+    def forward(self, x):
+        x = self.conv(x) 
+
+        if self.bn: 
+            x = self.batch_norm(x) 
+
+        if self.activation:
+            x = F.relu(x)
+
+        return x
+
+
+class DeConv2d(nn.Module):
+    def __init__(
+        self, 
+        cin: int, 
+        cout: int, 
+        kernel_size: int, 
+        stride: int, 
+        padding: int, 
+        bn: bool = True,
+    ):
+        super(DeConv2d, self).__init__()
+        self.cin = cin 
+        self.cout = cout 
+        self.kernel_size = kernel_size
+        self.stride = stride 
+        self.padding = padding 
+        
+        self.deconv = nn.ConvTranspose2d(
+            self.cin, self.cout, self.kernel_size, 
+            self.stride, self.padding)
+
+        if self.bn: 
+            self.batch_norm = nn.BatchNorm2d(self.cout)
+
+
+    def forward(self, x):
+        x = self.deconv(x)
+        if self.bn: 
+            x = self.batch_norm(x)
+        return F.relu(x) 
+
+
+class RPN3D(nn.Module):
+    def __init__(self):
+        super(RPN3D, self).__init__()
+
+
+    def forward(self, x):
+        return x 
+
 
 
 def test():
