@@ -94,13 +94,56 @@ def pcl_to_voxels(pcl, target: str, verbose: bool = False) -> dict:
     return voxel_dict
 
 
-"""
+
+def generate_anchors(cfg):
+    
+    x = np.linspace(cfg.OBJECT.X_MIN, cfg.OBJECT.X_MAX, cfg.OBJECT.FEATURE_WIDTH) 
+    y = np.linspace(cfg.OBJECT.Y_MIN, cfg.OBJECT.Y_MAX, cfg.OBJECT.FEATURE_HEIGHT)
+    cx, cy = np.meshgrid(x, y) 
+    cx = np.tile(cx[..., np.newaxis], 2)
+    cy = np.tile(cy[..., np.newaxis], 2)
+    cz = np.ones_like(cx) * cfg.OBJECT.ANCHOR_Z
+    w = np.ones_like(cx) * cfg.OBJECT.ANCHOR_W
+    l = np.ones_like(cx) * cfg.OBJECT.ANCHOR_L 
+    h = np.ones_like(cx) * cfg.OBJECT.ANCHOR_H
+    r = np.ones_like(cx) 
+    r[..., 0] = 0 
+    r[..., 1] = 90 / 180 * np.pi  # 90 
+
+    anchors = np.stack([
+        cx, cy, cz, h, w, l, r
+    ], axis=-1) 
+    
+    return anchors  
+
+
+def label_to_gt_box_3d(labels, cls_name: str, coordinate: str):
+    pass 
+
+
+
+def generate_targets(
+    labels, 
+    feature_map_shape, 
+    anchors, 
+    cls_name='Car', 
+    coordinate='lidar', 
+):
+    batch_size = labels.shape[0]
+    batch_gt_boxes_3d = label_to_gt_box_3d(labels, cls_name, coordinate)
+
+
+
+
+
 def test():
     pcl_path = "/data/kitti/3d_vision/training/velodyne/000009.bin"
     pcl = np.fromfile(pcl_path, dtype=np.float32).reshape(-1, 4)
     pcl_preproc = pcl_to_voxels(pcl, "Car", True)
+    from config import get_cfg_defaults
+    cfg = get_cfg_defaults()
+    anchors = generate_anchors(cfg)
 
 
 if __name__ == "__main__":
     test()
-"""

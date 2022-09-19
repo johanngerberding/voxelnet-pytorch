@@ -1,9 +1,10 @@
-from tkinter import W
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F 
 
 from config import get_cfg_defaults
+from utils import generate_anchors 
+
 
 cfg = get_cfg_defaults()
 
@@ -42,23 +43,14 @@ class FeatureLearningNet(nn.Module):
 
     def forward(self, feature: list, coordinate: list):
         bs = len(feature)
-        print(f"Batch size: {bs}")
         feature = torch.cat(feature, dim=0)
-        print(f"Feature size: {feature.size()}")
         coordinate = torch.cat(coordinate, dim=0)
-        print(f"Coordinate shape: {coordinate.size()}")
         vmax, _ = torch.max(feature, dim=2, keepdim=True)
-        print(f"Vmax shape: {vmax.size()}") 
         mask = (vmax != 0) 
-        print(f"Mask shape: {mask.shape}")
         x = self.vfe_1(feature, mask)
-        print(f"Shape after first layer: {x.size()}")
-
         x = self.vfe_2(x, mask)
-        print(f"Shape after second layer: {x.size()}")
 
         voxelwise, _ = torch.max(x, dim=1)
-        print(f"Voxelwise shape: {voxelwise.size()}")
         # use pytorch sparse tensor for efficient memory usage 
         outs = torch.sparse.FloatTensor(coordinate.t(), voxelwise, torch.Size(
             [bs, cfg.OBJECT.DEPTH, cfg.OBJECT.HEIGHT, cfg.OBJECT.WIDTH, 128]
@@ -79,8 +71,8 @@ class ConvMD(nn.Module):
         kernel_size: int, 
         stride: int, 
         padding: int, 
-        bn, 
-        activation,
+        bn: bool = True, 
+        activation: bool = True,
     ):
         super(ConvMD, self).__init__()
         self.input_dim = input_dim
@@ -146,6 +138,7 @@ class DeConv2d(nn.Module):
         self.kernel_size = kernel_size
         self.stride = stride 
         self.padding = padding 
+        self.bn = bn 
         
         self.deconv = nn.ConvTranspose2d(
             self.cin, self.cout, self.kernel_size, 
@@ -218,7 +211,7 @@ class MiddleConvNet(nn.Module):
             ConvMD(2, 256, 256, 3, (1, 1), (1, 1)),
         )
 
-        self.deconv3 = DeConv2d(256, 256, 2, (2, 2), (0, 0))
+        self.deconv3 = DeConv2d(256, 256, 4, (4, 4), (0, 0))
 
         self.prob_conv = ConvMD(2, 768, 2, 1, (1, 1), (0, 0), bn=False, activation=False)
         self.reg_conv = ConvMD(2, 768, 14, 1, (1, 1), (0, 0), bn=False, activation=False)
@@ -239,7 +232,6 @@ class MiddleConvNet(nn.Module):
 
         x = self.block3(x)
         tmp_deconv_3 = self.deconv3(x)
-
         x = torch.cat(
             [tmp_deconv_3, tmp_deconv_2, tmp_deconv_1], dim=1,
         )
@@ -254,42 +246,64 @@ class MiddleConvNet(nn.Module):
 
 
 class RPN3D(nn.Module):
-    def __init__(self):
+    def __init__(self, cls_name: str = 'Car', alpha=1.5, beta=1, sigma=3):
         super(RPN3D, self).__init__()
+        self.cls_name = cls_name
+        self.alpha = alpha 
+        self.beta = beta 
+        self.sigma = sigma 
+
+        self.feature_net = FeatureLearningNet()
+        self.middle_rpn = MiddleConvNet(alpha, beta, sigma)
+
+        self.anchors = generate_anchors(cfg)
+        self.rpn_output_shape = self.middle_rpn.output_shape
 
 
     def forward(self, x):
-        return x 
+        
+        label = x[0]
+        voxel_features = x[1]
+        voxel_numbers = x[2]
+        voxel_coordinates = x[3]
 
+        features = self.feature_net(voxel_features, voxel_coordinates)
+        print(features.size()) 
+        prob_out, delta_out = self.middle_rpn(features)
+        print(prob_out.size())
+        print(delta_out.size())
+
+        # calculate the ground truth
+
+
+        # calc loss 
+
+
+
+        return None 
 
 
 def test():
     from dataset import KITTIDataset
     import numpy as np  
+    from dataset import collate_fn
     dataset = KITTIDataset(cfg.DATA.DIR, False)
     print(len(dataset))
+    model = RPN3D()
+    print(model) 
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
 
-    feature_learning_net = FeatureLearningNet()
+    for data in dataloader:
+        print(type(data)) 
+        label, voxel_features, voxel_numbers, voxel_coordinates, rgb, raw_lidar = data 
+        print(type(label)) 
+        print(len(voxel_coordinates))
+        print(len(voxel_features)) 
+        out = model(data) 
+        break
 
-    #TODO iterate through dataset and prepare input for model
 
-    for img, pcl, labels, voxels in dataset:
-        feature = voxels['feature_buffer']   
-        print(feature.shape) 
-        coordinate = voxels['coordinate_buffer'] 
-        print(coordinate.shape)
-        print(coordinate[0, :]) 
-        feature = [torch.tensor(feature)]
-        coordinate = [
-            torch.from_numpy(
-                np.pad(coordinate, ((0,0), (1,0)), mode='constant', constant_values=0)
-            )
-        ]
-        print(f"coordinate shape after padding: {coordinate[0].size()}") 
-        print(coordinate[0][0, :]) 
-        out = feature_learning_net(feature, coordinate) 
-        print(out.size()) 
-        break  
 
 
 if __name__ == "__main__":
