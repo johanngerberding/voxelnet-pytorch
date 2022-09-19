@@ -1,3 +1,5 @@
+from multiprocessing.sharedctypes import Value
+from re import A
 import numpy as np 
 
 
@@ -96,7 +98,14 @@ def pcl_to_voxels(pcl, target: str, verbose: bool = False) -> dict:
 
 
 def generate_anchors(cfg):
-    
+    """Generate anchors.
+
+    Args:
+        cfg (_type_): YACS config object 
+
+    Returns:
+        np.ndarray: Anchors 
+    """    
     x = np.linspace(cfg.OBJECT.X_MIN, cfg.OBJECT.X_MAX, cfg.OBJECT.FEATURE_WIDTH) 
     y = np.linspace(cfg.OBJECT.Y_MIN, cfg.OBJECT.Y_MAX, cfg.OBJECT.FEATURE_HEIGHT)
     cx, cy = np.meshgrid(x, y) 
@@ -117,9 +126,99 @@ def generate_anchors(cfg):
     return anchors  
 
 
-def label_to_gt_box_3d(labels, cls_name: str, coordinate: str):
-    pass 
+def angle_in_limit(angle):
+    """Limit the angle between -pi/2 and pi/2"""     
+    while angle >= np.pi / 2:
+        angle -= np.pi 
+    while angle < -np.pi / 2:
+        angle += np.pi 
 
+    if abs(angle + np.pi / 2) < 5 / 180 * np.pi:
+        angle = np.pi / 2  
+    
+    return angle 
+
+
+def camera_to_lidar(x, y, z, T_VELO_2_CAM, R_RECT_0):
+    
+    if not T_VELO_2_CAM:
+        raise ValueError() 
+
+    if not R_RECT_0:
+        raise ValueError()
+
+    point = np.array([x, y, z, 1])
+    point = np.matmul(np.linalg.inv(R_RECT_0), point)
+    point = np.matmul(np.linalg.inv(T_VELO_2_CAM), point) 
+    point = point[:3]
+    
+    return point 
+
+
+def camera_to_lidar_box(boxes, T_VELO_2_CAM, R_RECT_0):
+    lidar_boxes = []
+    for box in boxes: 
+        x, y, z, h, w, l, ry = box 
+        (x, y, z), h, w, l, rz = camera_to_lidar(x, y, z, T_VELO_2_CAM, R_RECT_0), \
+            h, w, l, -ry - np.pi / 2 
+        rz = angle_in_limit(rz)
+        lidar_boxes.append([x, y, z, h, w, l, rz])
+    
+    return np.array(lidar_boxes).reshape(-1, 7)
+
+
+
+def label_to_gt_box_3d(
+    labels, 
+    cls_name: str, 
+    coordinate: str, 
+    T_VELO_2_CAM = None, 
+    R_RECT_0 = None,
+):
+    boxes3d = []
+
+    if cls_name == 'Car':
+        acc_cls = ['Car', 'Van']
+    elif cls_name == 'Pedestrian':
+        acc_cls = ['Pedestrian'] 
+    elif cls_name == 'Cyclist':
+        acc_cls = ['Cyclist'] 
+    else: 
+        acc_cls = []
+
+    for label in labels:
+        boxes3d_label = []
+        for line in label:
+            anno = line.split()
+            if anno[0] in acc_cls or acc_cls == []:
+                h, w, l, x, y, z, r = [float(i) for i in anno[-7:]]
+                box3d = np.array([x, y, z, h, w, l, r])
+                boxes3d_label.append(box3d)
+
+        if coordinate == 'lidar':
+            boxes3d_label = camera_to_lidar_box(
+                np.array(boxes3d_label), T_VELO_2_CAM, R_RECT_0)
+        
+        boxes3d.append(np.array(boxes3d_label).reshape(-1, 7))
+
+    return boxes3d
+
+
+def anchor_to_standup_box2d(anchors):
+    # x, y, w, l -> x1, y1, x2, y2
+    anchor_standup = np.zeros_like(anchors)
+
+    anchor_standup[::2, 0] = anchors[::2, 0] - anchors[::2, 3] / 2   
+    anchor_standup[::2, 1] = anchors[::2, 1] - anchors[::2, 2] / 2   
+    anchor_standup[::2, 2] = anchors[::2, 0] - anchors[::2, 3] / 2   
+    anchor_standup[::2, 3] = anchors[::2, 1] - anchors[::2, 2] / 2   
+
+    anchor_standup[1::2, 0] = anchors[1::2, 0] - anchors[1::2, 2] / 2   
+    anchor_standup[1::2, 1] = anchors[1::2, 1] - anchors[1::2, 3] / 2   
+    anchor_standup[1::2, 2] = anchors[1::2, 0] - anchors[1::2, 2] / 2   
+    anchor_standup[1::2, 3] = anchors[1::2, 1] - anchors[1::2, 3] / 2   
+    
+    return anchor_standup
 
 
 def generate_targets(
@@ -132,7 +231,20 @@ def generate_targets(
     batch_size = labels.shape[0]
     batch_gt_boxes_3d = label_to_gt_box_3d(labels, cls_name, coordinate)
 
+    anchors_reshaped = anchors.reshape(-1, 7)
+    # diagonal of the base of the anchor box (section 2.2)
+    anchors_diag = np.sqrt(
+        anchors_reshaped[:, 4] ** 2 + anchors_reshaped[:, 5] ** 2
+    ) 
 
+    pos_equal_one = np.zeros((batch_size, *feature_map_shape, 2))
+    neg_equal_one = np.zeros((batch_size, *feature_map_shape, 2))
+    targets = np.zeros((batch_size, *feature_map_shape, 14))
+
+    for batch_id in range(batch_size):
+        # transform anchors from (x, y, w, l) to (x1, y1, x2, y2)
+        anchors_standup_2d = anchor_to_standup_box2d(anchors_reshaped[:, [0, 1, 4, 5]])
+        
 
 
 
