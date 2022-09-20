@@ -1,5 +1,5 @@
 from multiprocessing.sharedctypes import Value
-from re import A
+from re import A, I
 import numpy as np 
 
 
@@ -139,13 +139,13 @@ def angle_in_limit(angle):
     return angle 
 
 
-def camera_to_lidar(x, y, z, T_VELO_2_CAM, R_RECT_0):
-    
+def camera_to_lidar(x, y, z, cfg, T_VELO_2_CAM=None, R_RECT_0=None):
+    """Transform camera coordinates to lidar coordinates."""
     if not T_VELO_2_CAM:
-        raise ValueError() 
+        T_VELO_2_CAM = np.array(cfg.CALIB.T_VELO_2_CAM)
 
     if not R_RECT_0:
-        raise ValueError()
+        R_RECT_0 = np.array(cfg.CALIB.R_RECT_0) 
 
     point = np.array([x, y, z, 1])
     point = np.matmul(np.linalg.inv(R_RECT_0), point)
@@ -155,11 +155,12 @@ def camera_to_lidar(x, y, z, T_VELO_2_CAM, R_RECT_0):
     return point 
 
 
-def camera_to_lidar_box(boxes, T_VELO_2_CAM, R_RECT_0):
+def camera_to_lidar_box(boxes, cfg, T_VELO_2_CAM=None, R_RECT_0=None):
+    """Transform boxes in camera coordinates to lidar coordinates."""  
     lidar_boxes = []
     for box in boxes: 
         x, y, z, h, w, l, ry = box 
-        (x, y, z), h, w, l, rz = camera_to_lidar(x, y, z, T_VELO_2_CAM, R_RECT_0), \
+        (x, y, z), h, w, l, rz = camera_to_lidar(x, y, z, cfg, T_VELO_2_CAM, R_RECT_0), \
             h, w, l, -ry - np.pi / 2 
         rz = angle_in_limit(rz)
         lidar_boxes.append([x, y, z, h, w, l, rz])
@@ -172,6 +173,7 @@ def label_to_gt_box_3d(
     labels, 
     cls_name: str, 
     coordinate: str, 
+    cfg,
     T_VELO_2_CAM = None, 
     R_RECT_0 = None,
 ):
@@ -197,13 +199,14 @@ def label_to_gt_box_3d(
 
         if coordinate == 'lidar':
             boxes3d_label = camera_to_lidar_box(
-                np.array(boxes3d_label), T_VELO_2_CAM, R_RECT_0)
+                np.array(boxes3d_label), cfg, T_VELO_2_CAM, R_RECT_0)
         
         boxes3d.append(np.array(boxes3d_label).reshape(-1, 7))
 
     return boxes3d
 
 
+# TODO: integration in generate_anchors??
 def anchor_to_standup_box2d(anchors):
     # x, y, w, l -> x1, y1, x2, y2
     anchor_standup = np.zeros_like(anchors)
@@ -221,15 +224,161 @@ def anchor_to_standup_box2d(anchors):
     return anchor_standup
 
 
+def corner_to_standup_box2d(boxes_corners):
+    # (bs, 4, 2) -> (N, 4) = x1, y1, x2, y2
+    N = boxes_corners.shape[0]
+    standup_boxes_2d = np.zeros((N, 4))
+    standup_boxes_2d[:, 0] = np.min(boxes_corners[:, :, 0], axis=1)
+    standup_boxes_2d[:, 1] = np.min(boxes_corners[:, :, 1], axis=1)
+    standup_boxes_2d[:, 2] = np.max(boxes_corners[:, :, 0], axis=1)
+    standup_boxes_2d[:, 3] = np.max(boxes_corners[:, :, 1], axis=1)
+
+    return standup_boxes_2d
+
+
+def center_to_corner_box_2d(
+    boxes_center,
+    cfg, 
+    coordinate='lidar', 
+    T_VELO_2_CAM=None, 
+    R_RECT_0=None,
+):  
+    # (N, 5) -> (N, 4, 2)
+    N = boxes_center.shape[0]
+    boxes_3d_center = np.zeros((N, 7))
+    boxes_3d_center[:, [0, 1, 4, 5, 6]] = boxes_center
+    boxes_3d_corner = center_to_corner_box_3d(
+        boxes_3d_center, coordinate, cfg, T_VELO_2_CAM, R_RECT_0
+    )
+
+    return boxes_3d_corner[:, 0:4, 0:2] 
+
+
+def lidar_to_camera_point(boxes, cfg, T_VELO_2_CAM=None, R_RECT_0=None):
+    # (N, 7) -> (N, 7) = x, y, z, h, w, l, r 
+    camera_boxes = []
+
+    for box in boxes:
+        x, y, z, h, w, l, rz = box 
+        (x, y, z), h, w, l, ry = lidar_to_camera(
+            x, y, z, T_VELO_2_CAM, R_RECT_0, cfg
+        ), h, w, l, -rz - np.pi / 2 
+        ry = angle_in_limit(ry)
+        camera_boxes.append([x, y, z, h, w, l, ry])
+    
+    return np.array(camera_boxes).reshape(-1, 7)
+
+
+def lidar_to_camera(x, y, z, cfg, T_VELO_2_CAM=None, R_RECT_0=None):
+    """Transform lidar coordinates to camera coordinates."""    
+    if not T_VELO_2_CAM:
+        T_VELO_2_CAM = np.array(cfg.CALIB.T_VELO_2_CAM)
+
+    if not R_RECT_0:
+        R_RECT_0 = np.array(cfg.CALIB.R_RECT_0) 
+
+    # homogenuous point
+    point = np.array([x, y, z, 1]) 
+    point = np.matmul(T_VELO_2_CAM, point)
+    point = np.matmul(R_RECT_0, point)
+    point = point[:, :3]
+
+    return tuple(point) 
+
+
+def center_to_corner_box_3d(
+    boxes_center, 
+    coordinate, 
+    cfg, 
+    T_VELO_2_CAM=None, 
+    R_RECT_0=None,
+):
+    # (N, 7) -> (N, 8, 3) = 8 corners in 3d
+    N = boxes_center.shape[0]
+    corner_box_3d = np.zeros((N, 8, 3), dtype=np.float32)
+
+    if coordinate == 'camera':
+        boxes_center = camera_to_lidar_box(boxes_center, cfg, T_VELO_2_CAM, R_RECT_0)
+    
+    for i in range(N):
+        box = boxes_center[i]
+        translation = box[:3]
+        size = box[4:6]
+        rotation = [0, 0, box[-1]]
+
+        h, w, l = box[0], box[1], box[2]
+
+        # in velodyne coordinates around zero point and without orientation
+        tracklet_box = np.array([
+            [-l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2], \
+            [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2], \
+            [0, 0, 0, 0, h, h, h, h]
+        ])
+
+        # re-create 3D bounding box in velodyne coordinate system 
+        yaw = box[-1] 
+        rot_mat = np.array([
+            [np.cos(yaw), -np.sin(yaw), 0.0],
+            [np.sin(yaw), np.cos(yaw), 0.0],
+            [0.0, 0.0, 1.0]
+        ])
+
+        corner_pos_in_velo = np.dot(rot_mat, tracklet_box) +\
+             np.tile(translation, (8, 1)).T
+
+        box3d = corner_pos_in_velo.transpose()
+        corner_box_3d[i] = box3d
+    
+    if coordinate == 'camera':
+        for idx in range(len(corner_box_3d)):
+            corner_box_3d[idx] = lidar_to_camera_point(
+                corner_box_3d[idx], cfg, T_VELO_2_CAM, R_RECT_0)
+
+    return corner_box_3d 
+
+
+def bbox_iou(box1: np.ndarray, box2: np.ndarray):
+    N = box1.shape[0]
+    K = box2.shape[0]
+
+    overlaps = np.zeros((N, K), dtype=np.float32)
+
+    for k in range(K):
+        box_area = (
+            (box2[k, 2] - box2[k, 0] + 1) * (box2[k, 3] - box2[k, 1] + 1)
+        ) 
+        for n in range(N):
+            iw = (
+                min(box1[n, 2], box2[k, 2]) - 
+                max(box1[n, 0], box2[k, 0]) + 1
+            )
+            if iw > 0: 
+                ih = (
+                    min(box1[n, 3], box2[k, 3]) - 
+                    max(box1[n, 1], box2[k, 1]) + 1
+                )
+
+                if ih > 0:
+                    ua = float(
+                        (box1[n, 1] - box1[n, 0] + 1) *
+                        (box1[n, 3] - box1[n, 1] + 1) + 
+                        box_area - iw * ih
+                    )
+                    overlaps[n, k] = iw * ih / ua
+    
+    return overlaps 
+
+
 def generate_targets(
     labels, 
     feature_map_shape, 
     anchors, 
+    cfg,
     cls_name='Car', 
     coordinate='lidar', 
 ):
     batch_size = labels.shape[0]
-    batch_gt_boxes_3d = label_to_gt_box_3d(labels, cls_name, coordinate)
+    batch_gt_boxes_3d = label_to_gt_box_3d(labels, cls_name, coordinate, cfg)
 
     anchors_reshaped = anchors.reshape(-1, 7)
     # diagonal of the base of the anchor box (section 2.2)
@@ -244,7 +393,28 @@ def generate_targets(
     for batch_id in range(batch_size):
         # transform anchors from (x, y, w, l) to (x1, y1, x2, y2)
         anchors_standup_2d = anchor_to_standup_box2d(anchors_reshaped[:, [0, 1, 4, 5]])
-        
+        print(f"Anchors 2d shape: {anchors_standup_2d.shape}") 
+        print(anchors_standup_2d[0, :]) 
+        gt_standup_2d = corner_to_standup_box2d(
+            center_to_corner_box_2d(
+                batch_gt_boxes_3d[batch_id][:, [0, 1, 4, 5, 6]], cfg, coordinate
+            )
+        )        
+        print(f"Groundtruth 2d boxes: {gt_standup_2d.shape}")
+        if gt_standup_2d.shape[0] > 0: 
+            print(gt_standup_2d[0, :]) 
+        # calculate iou between anchors and gt boxes
+        iou = bbox_iou(
+            np.ascontiguousarray(anchors_standup_2d).astype(np.float32),
+            np.ascontiguousarray(gt_standup_2d).astype(np.float32),
+        )
+        print(f"IOU shape: {iou.shape}")
+        print(iou[0,:])
+        # find anchor with highest iou 
+
+
+    return None  
+
 
 
 

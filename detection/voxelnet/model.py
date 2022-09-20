@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F 
 
 from config import get_cfg_defaults
-from utils import generate_anchors 
+from utils import generate_anchors, generate_targets 
 
 
 cfg = get_cfg_defaults()
@@ -274,7 +274,7 @@ class RPN3D(nn.Module):
         print(delta_out.size())
 
         # calculate the ground truth
-
+        targets = generate_targets(label, self.rpn_output_shape, self.anchors, cfg) 
 
         # calc loss 
 
