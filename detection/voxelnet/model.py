@@ -1,6 +1,7 @@
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F 
+import numpy as np 
 
 from config import get_cfg_defaults
 from utils import generate_anchors, generate_targets 
@@ -223,7 +224,9 @@ class MiddleConvNet(nn.Module):
         x = x.permute(0, 4, 1, 2, 3) # (B, D, H, W, C) -> (B, C, D, H, W)
         
         x = self.middle_layer(x)
-        x = x.view(batch_size, -1, height, width)
+        #print(f"x shape: {x.size()}")
+        #x = x.view(batch_size, -1, height, width)
+        x = x.reshape((batch_size, -1, height, width)) 
         x = self.block1(x) 
         tmp_deconv_1 = self.deconv1(x)
 
@@ -260,12 +263,14 @@ class RPN3D(nn.Module):
         self.rpn_output_shape = self.middle_rpn.output_shape
 
 
-    def forward(self, x):
-        
+    def forward(self, x, device):
+
         label = x[0]
         voxel_features = x[1]
         voxel_numbers = x[2]
         voxel_coordinates = x[3]
+        voxel_features = [f.to(device) for f in voxel_features]
+        voxel_coordinates = [c.to(device) for c in voxel_coordinates]
 
         features = self.feature_net(voxel_features, voxel_coordinates)
         print(features.size()) 
@@ -274,8 +279,36 @@ class RPN3D(nn.Module):
         print(delta_out.size())
 
         # calculate the ground truth
-        targets = generate_targets(label, self.rpn_output_shape, self.anchors, cfg) 
+        pos_equal_one, neg_equal_one, targets = generate_targets(label, self.rpn_output_shape, self.anchors, cfg) 
+        print(f"pos equal one shape: {pos_equal_one.shape}")
+        print(f"neg equal one shape: {neg_equal_one.shape}") 
+        print(f"targets shape: {targets.shape}")
+        pos_equal_one_for_reg = np.concatenate(
+            [np.tile(pos_equal_one[..., [0]], 7), np.tile(pos_equal_one[..., [1]], 7)], axis=-1
+        )
+        print(f"pos equal one for reg shape: {pos_equal_one_for_reg.shape}") 
 
+        pos_equal_one_sum = np.clip(
+            np.sum(
+                pos_equal_one, axis=(1, 2, 3)
+            ).reshape(-1, 1, 1, 1), a_min=1, a_max=None,
+        )
+        print(f"pos equal one sum shape: {pos_equal_one_sum.shape}")
+        print(pos_equal_one_sum[:, :, :, :]) 
+        neg_equal_one_sum = np.clip(
+            np.sum(
+                neg_equal_one, axis=(1, 2, 3)
+            ).reshape(-1, 1, 1, 1), a_min=1, a_max=None,
+        )
+        print(f"neg equal one sum shape: {neg_equal_one_sum.shape}")
+
+        # move everything to gpu   
+        device = features.device 
+        print(device)
+        pos_equal_one = torch.from_numpy(pos_equal_one).to(device).float()
+        neg_equal_one = torch.from_numpy(neg_equal_one).to(device).float() 
+        
+        
         # calc loss 
 
 
@@ -287,20 +320,25 @@ def test():
     from dataset import KITTIDataset
     import numpy as np  
     from dataset import collate_fn
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device) 
     dataset = KITTIDataset(cfg.DATA.DIR, False)
     print(len(dataset))
-    model = RPN3D()
+    model = RPN3D().cuda()
     print(model) 
     dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
+        dataset, batch_size=1, shuffle=True, collate_fn=collate_fn, pin_memory=False)
 
     for data in dataloader:
         print(type(data)) 
         label, voxel_features, voxel_numbers, voxel_coordinates, rgb, raw_lidar = data 
+        voxel_features = [f.to(device) for f in voxel_features]
+        voxel_coordinates = [c.to(device) for c in voxel_coordinates] 
         print(type(label)) 
         print(len(voxel_coordinates))
         print(len(voxel_features)) 
-        out = model(data) 
+        
+        out = model(data, device) 
         break
 
 

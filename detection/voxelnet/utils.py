@@ -411,9 +411,74 @@ def generate_targets(
         print(f"IOU shape: {iou.shape}")
         print(iou[0,:])
         # find anchor with highest iou 
+        id_max = np.argmax(iou.T, axis=1)
+        id_max_gt = np.arange(iou.T.shape[0])
+        mask = iou.T[id_max_gt, id_max] > 0 
+        id_max, id_max_gt = id_max[mask], id_max_gt[mask]
+        print(f"ID max: {id_max}")
+        print(id_max_gt)
+
+        # get anchour iou > cfg.OBJECT.POS_IOU
+        id_pos, id_pos_gt = np.where(iou > cfg.OBJECT.RPN_POS_IOU)
+        print(f"ID pos shape: {id_pos.shape}")
+        # get anchor iou < cfg.OBJECT.NEG_IOU
+        id_neg = np.where(np.sum(iou < cfg.OBJECT.RPN_NEG_IOU, axis=1) == iou.shape[1])[0]
+        print(f"ID neg shape: {id_neg.shape}")
+
+        id_pos = np.concatenate([id_pos, id_max])
+        id_pos_gt = np.concatenate([id_pos_gt, id_max_gt])
+        print(f"ID pos shape: {id_pos.shape}")
+        print(f"ID pos gt shape: {id_pos_gt.shape}")
+        
+        id_pos, idx = np.unique(id_pos, return_index=True)
+        id_pos_gt = id_pos_gt[idx]
+        id_neg.sort()
+
+        index_x, index_y, index_z = np.unravel_index(id_pos, (*feature_map_shape, 2))
+        pos_equal_one[batch_id, index_x, index_y, index_z] = 1
+
+        # delta x from paper section 2.2.
+        targets[batch_id, index_x, index_y, np.array(index_z) * 7] = (
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 0] - anchors_reshaped[id_pos, 0]
+        ) / anchors_diag[id_pos]
+        # delta y from paper section 2.2.
+        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 1] = (
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 1] - anchors_reshaped[id_pos, 1]
+        ) / anchors_diag[id_pos]
+        # delta z from paper section 2.2 
+        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 2] = (
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 2] - anchors_reshaped[id_pos, 2]
+        ) / cfg.OBJECT.ANCHOR_H 
+        # delta l 
+        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 3] = np.log(
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 3] - anchors_reshaped[id_pos, 3]
+        )
+        # delta w 
+        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 4] = np.log(
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 4] - anchors_reshaped[id_pos, 4]
+        )
+        # delta h 
+        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 5] = np.log(
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 5] - anchors_reshaped[id_pos, 5]
+        )
+        # delta theta
+        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 6] = (
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 6] - anchors_reshaped[id_pos, 6]
+        )
+
+        index_x, index_y, index_z = np.unravel_index(id_neg, (*feature_map_shape, 2))
+        neg_equal_one[batch_id, index_x, index_y, index_z] = 1
+        # avoid a box to be positive and negative at the same time  
+        # index_x, index_z, index_z = np.unravel_index(id_max, (*feature_map_shape, 2))
+        # print(f"id max shape: {id_max.shape}")
+        # print(f"id pos shape: {id_pos.shape}") 
+        # print(f"index x : {index_x}")
+        # print(f"index y : {index_y}")
+        # print(f"index z : {index_z}")
+        # neg_equal_one[batch_id, index_x, index_y, index_z] = 0 
 
 
-    return None  
+    return pos_equal_one, neg_equal_one, targets 
 
 
 
