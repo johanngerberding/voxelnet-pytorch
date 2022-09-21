@@ -1,5 +1,3 @@
-from multiprocessing.sharedctypes import Value
-from re import A, I
 import numpy as np 
 
 
@@ -393,42 +391,30 @@ def generate_targets(
     for batch_id in range(batch_size):
         # transform anchors from (x, y, w, l) to (x1, y1, x2, y2)
         anchors_standup_2d = anchor_to_standup_box2d(anchors_reshaped[:, [0, 1, 4, 5]])
-        print(f"Anchors 2d shape: {anchors_standup_2d.shape}") 
-        print(anchors_standup_2d[0, :]) 
         gt_standup_2d = corner_to_standup_box2d(
             center_to_corner_box_2d(
                 batch_gt_boxes_3d[batch_id][:, [0, 1, 4, 5, 6]], cfg, coordinate
             )
         )        
-        print(f"Groundtruth 2d boxes: {gt_standup_2d.shape}")
-        if gt_standup_2d.shape[0] > 0: 
-            print(gt_standup_2d[0, :]) 
+        
         # calculate iou between anchors and gt boxes
         iou = bbox_iou(
             np.ascontiguousarray(anchors_standup_2d).astype(np.float32),
             np.ascontiguousarray(gt_standup_2d).astype(np.float32),
         )
-        print(f"IOU shape: {iou.shape}")
-        print(iou[0,:])
         # find anchor with highest iou 
         id_max = np.argmax(iou.T, axis=1)
         id_max_gt = np.arange(iou.T.shape[0])
         mask = iou.T[id_max_gt, id_max] > 0 
         id_max, id_max_gt = id_max[mask], id_max_gt[mask]
-        print(f"ID max: {id_max}")
-        print(id_max_gt)
 
         # get anchour iou > cfg.OBJECT.POS_IOU
         id_pos, id_pos_gt = np.where(iou > cfg.OBJECT.RPN_POS_IOU)
-        print(f"ID pos shape: {id_pos.shape}")
         # get anchor iou < cfg.OBJECT.NEG_IOU
         id_neg = np.where(np.sum(iou < cfg.OBJECT.RPN_NEG_IOU, axis=1) == iou.shape[1])[0]
-        print(f"ID neg shape: {id_neg.shape}")
 
         id_pos = np.concatenate([id_pos, id_max])
         id_pos_gt = np.concatenate([id_pos_gt, id_max_gt])
-        print(f"ID pos shape: {id_pos.shape}")
-        print(f"ID pos gt shape: {id_pos_gt.shape}")
         
         id_pos, idx = np.unique(id_pos, return_index=True)
         id_pos_gt = id_pos_gt[idx]
@@ -477,10 +463,7 @@ def generate_targets(
         # print(f"index z : {index_z}")
         # neg_equal_one[batch_id, index_x, index_y, index_z] = 0 
 
-
     return pos_equal_one, neg_equal_one, targets 
-
-
 
 
 def test():

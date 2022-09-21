@@ -8,7 +8,21 @@ _C.SYSTEM.NUM_GPUS = 1
 _C.SYSTEM.NUM_WORKERS = 4
 
 _C.DATA = CN()
-_C.DATA.DIR= "/data/kitti/3d_vision/training" 
+_C.DATA.DIR= "/data/kitti/3d_vision"
+
+_C.TRAIN = CN()
+_C.TRAIN.BATCH_SIZE = 1
+_C.TRAIN.NUM_WORKERS = 4
+_C.TRAIN.LR = 0.001 
+_C.TRAIN.ALPHA = 1.5
+_C.TRAIN.BETA = 1
+_C.TRAIN.NUM_EPOCHS = 20  
+
+
+_C.VAL = CN()
+_C.VAL.BATCH_SIZE = 1
+_C.VAL.NUM_WORKERS = 4
+
 
 _C.IMAGE = CN()
 _C.IMAGE.WIDTH = 1242 

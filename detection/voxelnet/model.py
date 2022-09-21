@@ -333,6 +333,11 @@ class RPN3D(nn.Module):
         )
 
 
+    def predict(self, data, probs, deltas, summary=False, visual=False):
+        raise NotImplementedError
+
+
+
 def test():
     from dataset import KITTIDataset
     import numpy as np  
