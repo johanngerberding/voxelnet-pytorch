@@ -1,10 +1,12 @@
+from turtle import pos
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F 
 import numpy as np 
 
 from config import get_cfg_defaults
-from utils import generate_anchors, generate_targets 
+from utils import generate_anchors, generate_targets
+from loss import smooth_L1_loss 
 
 
 cfg = get_cfg_defaults()
@@ -264,7 +266,6 @@ class RPN3D(nn.Module):
 
 
     def forward(self, x, device):
-
         label = x[0]
         voxel_features = x[1]
         voxel_numbers = x[2]
@@ -273,47 +274,63 @@ class RPN3D(nn.Module):
         voxel_coordinates = [c.to(device) for c in voxel_coordinates]
 
         features = self.feature_net(voxel_features, voxel_coordinates)
-        print(features.size()) 
         prob_out, delta_out = self.middle_rpn(features)
-        print(prob_out.size())
-        print(delta_out.size())
 
         # calculate the ground truth
         pos_equal_one, neg_equal_one, targets = generate_targets(label, self.rpn_output_shape, self.anchors, cfg) 
-        print(f"pos equal one shape: {pos_equal_one.shape}")
-        print(f"neg equal one shape: {neg_equal_one.shape}") 
-        print(f"targets shape: {targets.shape}")
         pos_equal_one_for_reg = np.concatenate(
             [np.tile(pos_equal_one[..., [0]], 7), np.tile(pos_equal_one[..., [1]], 7)], axis=-1
         )
-        print(f"pos equal one for reg shape: {pos_equal_one_for_reg.shape}") 
 
         pos_equal_one_sum = np.clip(
             np.sum(
                 pos_equal_one, axis=(1, 2, 3)
             ).reshape(-1, 1, 1, 1), a_min=1, a_max=None,
         )
-        print(f"pos equal one sum shape: {pos_equal_one_sum.shape}")
-        print(pos_equal_one_sum[:, :, :, :]) 
         neg_equal_one_sum = np.clip(
             np.sum(
                 neg_equal_one, axis=(1, 2, 3)
             ).reshape(-1, 1, 1, 1), a_min=1, a_max=None,
         )
-        print(f"neg equal one sum shape: {neg_equal_one_sum.shape}")
 
         # move everything to gpu   
         device = features.device 
-        print(device)
         pos_equal_one = torch.from_numpy(pos_equal_one).to(device).float()
         neg_equal_one = torch.from_numpy(neg_equal_one).to(device).float() 
-        
+        targets = torch.from_numpy(targets).to(device).float() 
+        pos_equal_one_for_reg = torch.from_numpy(pos_equal_one_for_reg).to(device).float()
+        pos_equal_one_sum = torch.from_numpy(pos_equal_one_sum).to(device).float()
+        neg_equal_one_sum = torch.from_numpy(neg_equal_one_sum).to(device).float()
+
+        # reshape 
+        pos_equal_one = pos_equal_one.permute(0, 3, 1, 2)
+        neg_equal_one = neg_equal_one.permute(0, 3, 1, 2)
+        targets = targets.permute(0, 3, 1, 2) 
+        pos_equal_one_for_reg = pos_equal_one_for_reg.permute(0, 3, 1, 2) 
         
         # calc loss 
+        cls_pos_loss = (-pos_equal_one * torch.log(prob_out + 1e-6)) / pos_equal_one_sum
+        cls_neg_loss = (-neg_equal_one * torch.log(1 - prob_out + 1e-6)) / neg_equal_one_sum
+        cls_loss = torch.sum(self.alpha * cls_pos_loss + self.beta * cls_neg_loss)
 
+        cls_pos_loss_rec = torch.sum(cls_pos_loss)
+        cls_neg_loss_rec = torch.sum(cls_neg_loss)
 
+        reg_loss = smooth_L1_loss(delta_out * pos_equal_one_for_reg, targets * pos_equal_one_for_reg, self.sigma) / \
+            pos_equal_one_sum
+        
+        reg_loss = torch.sum(reg_loss)
+        loss = cls_loss + reg_loss
 
-        return None 
+        return (
+            prob_out, 
+            delta_out, 
+            loss, 
+            cls_loss, 
+            reg_loss, 
+            cls_pos_loss_rec, 
+            cls_neg_loss_rec,
+        )
 
 
 def test():
@@ -338,7 +355,12 @@ def test():
         print(len(voxel_coordinates))
         print(len(voxel_features)) 
         
-        out = model(data, device) 
+        (prob_out, delta_out, loss, cls_loss, reg_loss, _, _) = model(data, device) 
+        print(f"Prob out: {prob_out.shape}") 
+        print(f"Delta out: {delta_out.shape}")
+        print(f"Loss: {loss}")
+        print(f"Cls loss: {cls_loss}")
+        print(f"Reg loss: {reg_loss}")
         break
 
 
