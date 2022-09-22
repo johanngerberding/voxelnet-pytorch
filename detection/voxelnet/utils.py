@@ -426,8 +426,8 @@ def generate_targets(
         # delta x from paper section 2.2.
         targets[batch_id, index_x, index_y, np.array(index_z) * 7] = (
             batch_gt_boxes_3d[batch_id][id_pos_gt, 0] - anchors_reshaped[id_pos, 0]
-        ) / anchors_diag[id_pos]
-        # delta y from paper section 2.2.
+        ) / anchors_diag[id_pos] 
+        #delta y from paper section 2.2.
         targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 1] = (
             batch_gt_boxes_3d[batch_id][id_pos_gt, 1] - anchors_reshaped[id_pos, 1]
         ) / anchors_diag[id_pos]
@@ -435,17 +435,19 @@ def generate_targets(
         targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 2] = (
             batch_gt_boxes_3d[batch_id][id_pos_gt, 2] - anchors_reshaped[id_pos, 2]
         ) / cfg.OBJECT.ANCHOR_H 
-        # delta l 
-        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 3] = np.log(
-            batch_gt_boxes_3d[batch_id][id_pos_gt, 3] - anchors_reshaped[id_pos, 3]
+        # delta l
+        delta_l = np.log(
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 3] / anchors_reshaped[id_pos, 3]
         )
-        # delta w 
-        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 4] = np.log(
-            batch_gt_boxes_3d[batch_id][id_pos_gt, 4] - anchors_reshaped[id_pos, 4]
+        targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 3] = delta_l
+        # delta w
+        delta_w = np.log(
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 4] / anchors_reshaped[id_pos, 4]
         )
+        targets[batch_id, index_x, index_y, index_z * 7 + 4] = delta_w 
         # delta h 
         targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 5] = np.log(
-            batch_gt_boxes_3d[batch_id][id_pos_gt, 5] - anchors_reshaped[id_pos, 5]
+            batch_gt_boxes_3d[batch_id][id_pos_gt, 5] / anchors_reshaped[id_pos, 5]
         )
         # delta theta
         targets[batch_id, index_x, index_y, np.array(index_z) * 7 + 6] = (
@@ -464,6 +466,24 @@ def generate_targets(
         # neg_equal_one[batch_id, index_x, index_y, index_z] = 0 
 
     return pos_equal_one, neg_equal_one, targets 
+
+
+def deltas_to_boxes_3d(deltas, anchors, cfg, coordinate='lidar'):
+    anchors_reshaped = anchors.reshape(-1, 7)
+    deltas = deltas.reshape(deltas.shape[0], -1, 7)
+    anchors_d = np.sqrt(
+        anchors_reshaped[:, 4] ** 2 + anchors_reshaped[:, 5] ** 2
+    ) 
+    boxes_3d = np.zeros_like(deltas)
+    
+    boxes_3d[..., [0, 1]] = deltas[..., [0, 1]] * anchors_d[:, np.newaxis] + anchors_reshaped[..., [0, 1]]
+    boxes_3d[..., [2]] = deltas[..., [2]] * cfg.OBJECT.ANCHOR_H + anchors_reshaped[..., [2]]
+    boxes_3d[..., [3, 4, 5]] = np.exp(deltas[..., [3, 4, 5]]) * anchors_reshaped[..., [3, 4, 5]]
+    boxes_3d[..., 6] = deltas[..., 6] + anchors_reshaped[..., 6] 
+    
+    return boxes_3d
+
+
 
 
 def test():

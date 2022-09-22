@@ -21,8 +21,8 @@ def save_checkpoint(model, is_best, checkpoint_dir, epoch):
 
 def main():
     # argparse stuff  
-    summary_interval = 10 # iterations!  
-    print_interval = 10 # iterations 
+    summary_interval = 100 # iterations!  
+    print_interval = 100 # iterations 
     val_epoch = 10 
     start_epoch = 0 
     global_counter = 0 
@@ -83,17 +83,20 @@ def main():
     if model_checkpoint and resume: 
         raise NotImplementedError
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.TRAIN.LR)
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [150])
+    optimizer = torch.optim.SGD(model.parameters(), lr=cfg.TRAIN.LR)
+    #lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [150])
     summary = SummaryWriter() 
     
     for epoch in range(start_epoch, cfg.TRAIN.NUM_EPOCHS):
+        print("-" * 30) 
+        print(f"Epoch {epoch+1}") 
+        print("-" * 30) 
         counter = 0  
-        lr_scheduler.step()
         for (i, data) in enumerate(train_dataloader):
             counter += 1  
             global_counter += 1  
             model.train(True)
+
             _, _, loss, cls_loss, reg_loss, cls_pos_loss_rec, cls_neg_loss_rec = model(data, device)
             loss.backward()
             # gradient clipping 
@@ -115,6 +118,7 @@ def main():
                     }, global_counter
                 )
 
+        #lr_scheduler.step()
 
     print("Training finished.")
     summary.close()

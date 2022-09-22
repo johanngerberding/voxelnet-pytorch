@@ -5,7 +5,8 @@ import torch.nn.functional as F
 import numpy as np 
 
 from config import get_cfg_defaults
-from utils import generate_anchors, generate_targets
+from detection.voxelnet.utils import label_to_gt_box_3d
+from utils import generate_anchors, generate_targets, deltas_to_boxes_3d
 from loss import smooth_L1_loss 
 
 
@@ -159,14 +160,7 @@ class DeConv2d(nn.Module):
 
 
 class MiddleConvNet(nn.Module):
-    def __init__(
-        self, 
-        alpha: float = 1.5, 
-        beta: int = 1, 
-        sigma: int = 3, 
-        training: bool = True, 
-        name: str = '',
-    ):
+    def __init__(self):
         super(MiddleConvNet, self).__init__()
         
         self.middle_layer = nn.Sequential(
@@ -259,7 +253,8 @@ class RPN3D(nn.Module):
         self.sigma = sigma 
 
         self.feature_net = FeatureLearningNet()
-        self.middle_rpn = MiddleConvNet(alpha, beta, sigma)
+        self.middle_rpn = MiddleConvNet()
+        #self.reg_loss_fn = torch.nn.SmoothL1Loss(reduction='sum')
 
         self.anchors = generate_anchors(cfg)
         self.rpn_output_shape = self.middle_rpn.output_shape
@@ -268,7 +263,7 @@ class RPN3D(nn.Module):
     def forward(self, x, device):
         label = x[0]
         voxel_features = x[1]
-        voxel_numbers = x[2]
+        #voxel_numbers = x[2]
         voxel_coordinates = x[3]
         voxel_features = [f.to(device) for f in voxel_features]
         voxel_coordinates = [c.to(device) for c in voxel_coordinates]
@@ -316,10 +311,11 @@ class RPN3D(nn.Module):
         cls_pos_loss_rec = torch.sum(cls_pos_loss)
         cls_neg_loss_rec = torch.sum(cls_neg_loss)
 
+        #reg_loss = self.reg_loss_fn(delta_out * pos_equal_one_for_reg, targets * pos_equal_one_for_reg) 
         reg_loss = smooth_L1_loss(delta_out * pos_equal_one_for_reg, targets * pos_equal_one_for_reg, self.sigma) / \
             pos_equal_one_sum
-        
         reg_loss = torch.sum(reg_loss)
+        
         loss = cls_loss + reg_loss
 
         return (
@@ -334,7 +330,34 @@ class RPN3D(nn.Module):
 
 
     def predict(self, data, probs, deltas, summary=False, visual=False):
-        raise NotImplementedError
+
+        device = probs.device         
+        label = data[0]
+        voxel_features = data[1]
+        voxel_numbers = data[2]
+        voxel_coordinates = data[3]
+        rgb = data[4]
+        raw_lidar = data[5]
+
+        batch_size = probs.shape[0]
+        batch_gt_boxes_3d = None 
+
+        if summary or visual: 
+            batch_gt_boxes_3d = label_to_gt_box_3d(label, cls_name='Car', coordinate='lidar')
+
+        probs = probs.cpu().detach().numpy()
+        deltas = deltas.cpu().detach().numpy()
+
+        batch_boxes_3d = deltas_to_boxes_3d(deltas, self.anchors, cfg, coordinate='lidar') 
+        batch_boxes_2d = batch_boxes_3d[:, :, [0, 1, 4, 5, 6]] 
+        batch_probs = probs.reshape((batch_size, -1))
+
+        # NMS 
+        ret_box_3d = []
+        ret_score = []
+
+        for batch_id in range(batch_size):
+            pass 
 
 
 
