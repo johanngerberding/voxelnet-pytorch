@@ -5,10 +5,13 @@ import torch.nn.functional as F
 import numpy as np 
 
 from config import get_cfg_defaults
-from detection.voxelnet.utils import (
-    center_to_corner_box_2d, 
-    corner_to_standup_box2d, 
-    label_to_gt_box_3d, 
+from utils import (
+    center_to_corner_box_2d,
+    colorize, 
+    corner_to_standup_box2d,
+    draw_lidar_box_3d_on_birdview, 
+    label_to_gt_box_3d,
+    lidar_to_bird_view_image, 
     nms, 
     generate_anchors, 
     generate_targets, 
@@ -399,8 +402,28 @@ class RPN3D(nn.Module):
             ))
         
         if summary:
-            pass 
+            cur_tag = tag[i]
+            P, Tr, R = load_calib(os.path.join(cfg.DATA.CALIB_DIR, cur_tag + '.txt'))
+            
+            front_image = draw_lidar_box_3d_on_image(
+                rgb[i], ret_box_3d[i],  batch_gt_boxes_3d[i], 
+                P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
 
+            birdview = lidar_to_bird_view_image(raw_lidar[i], factor=1) 
+            birdview = draw_lidar_box_3d_on_birdview(
+                birdview, ret_box_3d[i], batch_gt_boxes_3d[i], factor=1, 
+                P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
+            
+            heatmap = colorize(probs[i, ...], 1)
+
+            ret_summary = [
+                ['predict/front_view_rgb', front_image[np.newaxis, ...]],
+                ['predict/bird_view-lidar', birdview[np.newaxis, ...]],
+                ['predict/bird_view_heatmap', heatmap[np.newaxis, ...]],
+            ] 
+
+            return tag, ret_box_3d_score, ret_summary 
+        
         if visual:
             front_images, bird_views, heatmaps = [], [], []
             for i in range(len(rgb)):
@@ -410,8 +433,21 @@ class RPN3D(nn.Module):
                 front_image = draw_lidar_box_3d_on_image(
                     rgb[i], ret_box_3d[i],  batch_gt_boxes_3d[i], 
                     P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
-            
-            
+
+                birdview = lidar_to_bird_view_image(raw_lidar[i], factor=1) 
+                birdview = draw_lidar_box_3d_on_birdview(
+                    birdview, ret_box_3d[i], batch_gt_boxes_3d[i], factor=1, 
+                    P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
+                
+                heatmap = colorize(probs[i, ...], 1)
+
+                front_images.append(front_image)
+                bird_views.append(birdview)
+                heatmaps.append(heatmap)
+
+            return tag, ret_box_3d_score, front_images, bird_views, heatmaps
+
+        return tag, ret_box_3d_score 
 
 
 

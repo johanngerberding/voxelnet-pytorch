@@ -8,7 +8,7 @@ _C.SYSTEM.NUM_GPUS = 1
 _C.SYSTEM.NUM_WORKERS = 4
 
 _C.DATA = CN()
-_C.DATA.DIR= "/data/kitti/3d_vision/data/KITTI/"
+_C.DATA.DIR= "/data/kitti/3d_vision/data/MD_KITTI"
 
 _C.TRAIN = CN()
 _C.TRAIN.BATCH_SIZE = 1

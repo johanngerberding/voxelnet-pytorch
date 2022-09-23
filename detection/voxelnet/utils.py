@@ -1,6 +1,11 @@
 import torch 
 import numpy as np 
 import cv2 
+import math 
+
+
+from config import get_cfg_defaults
+cfg = get_cfg_defaults()
 
 
 def pcl_to_voxels(pcl, target: str, verbose: bool = False) -> dict:
@@ -569,11 +574,85 @@ def load_calib(calib_path: str):
     return P, Tr_velo_to_cam, R_cam_to_rect
 
 
-def center_to_corner_box3d():
-    
-      
-    
-    pass 
+def center_to_corner_box3d(
+    boxes_corner, 
+    coordinate='lidar', 
+    T_VELO_2_CAM=None, 
+    R_RECT_0=None,
+):
+    # (N, 8, 3) -> (N, 7); x,y,z,h,w,l,ry/z
+    if coordinate == 'lidar':
+        for idx in range(len(boxes_corner)):
+            boxes_corner[idx] = lidar_to_camera_point(boxes_corner[idx], T_VELO_2_CAM, R_RECT_0)
+    ret = []
+    for roi in boxes_corner:
+        if cfg.CORNER2CENTER_AVG:  # average version
+            roi = np.array(roi)
+            h = abs(np.sum(roi[:4, 1] - roi[4:, 1]) / 4)
+            w = np.sum(
+                np.sqrt(np.sum((roi[0, [0, 2]] - roi[3, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[1, [0, 2]] - roi[2, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[4, [0, 2]] - roi[7, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[5, [0, 2]] - roi[6, [0, 2]])**2))
+            ) / 4
+            l = np.sum(
+                np.sqrt(np.sum((roi[0, [0, 2]] - roi[1, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[2, [0, 2]] - roi[3, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[4, [0, 2]] - roi[5, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[6, [0, 2]] - roi[7, [0, 2]])**2))
+            ) / 4
+            x = np.sum(roi[:, 0], axis = 0)/ 8
+            y = np.sum(roi[0:4, 1], axis = 0)/ 4
+            z = np.sum(roi[:, 2], axis = 0)/ 8
+            ry = np.sum(
+                math.atan2(roi[2, 0] - roi[1, 0], roi[2, 2] - roi[1, 2]) +
+                math.atan2(roi[6, 0] - roi[5, 0], roi[6, 2] - roi[5, 2]) +
+                math.atan2(roi[3, 0] - roi[0, 0], roi[3, 2] - roi[0, 2]) +
+                math.atan2(roi[7, 0] - roi[4, 0], roi[7, 2] - roi[4, 2]) +
+                math.atan2(roi[0, 2] - roi[1, 2], roi[1, 0] - roi[0, 0]) +
+                math.atan2(roi[4, 2] - roi[5, 2], roi[5, 0] - roi[4, 0]) +
+                math.atan2(roi[3, 2] - roi[2, 2], roi[2, 0] - roi[3, 0]) +
+                math.atan2(roi[7, 2] - roi[6, 2], roi[6, 0] - roi[7, 0])
+            ) / 8
+            if w > l:
+                w, l = l, w
+                ry = angle_in_limit(ry + np.pi / 2)
+        else:  # max version
+            h = max(abs(roi[:4, 1] - roi[4:, 1]))
+            w = np.max(
+                np.sqrt(np.sum((roi[0, [0, 2]] - roi[3, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[1, [0, 2]] - roi[2, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[4, [0, 2]] - roi[7, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[5, [0, 2]] - roi[6, [0, 2]])**2))
+            )
+            l = np.max(
+                np.sqrt(np.sum((roi[0, [0, 2]] - roi[1, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[2, [0, 2]] - roi[3, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[4, [0, 2]] - roi[5, [0, 2]])**2)) +
+                np.sqrt(np.sum((roi[6, [0, 2]] - roi[7, [0, 2]])**2))
+            )
+            x = np.sum(roi[:, 0], axis = 0)/ 8
+            y = np.sum(roi[0:4, 1], axis = 0)/ 4
+            z = np.sum(roi[:, 2], axis = 0)/ 8
+            ry = np.sum(
+                math.atan2(roi[2, 0] - roi[1, 0], roi[2, 2] - roi[1, 2]) +
+                math.atan2(roi[6, 0] - roi[5, 0], roi[6, 2] - roi[5, 2]) +
+                math.atan2(roi[3, 0] - roi[0, 0], roi[3, 2] - roi[0, 2]) +
+                math.atan2(roi[7, 0] - roi[4, 0], roi[7, 2] - roi[4, 2]) +
+                math.atan2(roi[0, 2] - roi[1, 2], roi[1, 0] - roi[0, 0]) +
+                math.atan2(roi[4, 2] - roi[5, 2], roi[5, 0] - roi[4, 0]) +
+                math.atan2(roi[3, 2] - roi[2, 2], roi[2, 0] - roi[3, 0]) +
+                math.atan2(roi[7, 2] - roi[6, 2], roi[6, 0] - roi[7, 0])
+            ) / 8
+            if w > l:
+                w, l = l, w
+                ry = angle_in_limit(ry + np.pi / 2)
+        ret.append([x, y, z, h, w, l, ry])
+    if coordinate == 'lidar':
+        ret = camera_to_lidar_box(np.array(ret), T_VELO_2_CAM, R_RECT_0)
+
+    return np.array(ret) 
+
 
 
 def lidar_box3d_to_camera_box(
@@ -669,16 +748,166 @@ def draw_lidar_box_3d_on_image(
     return cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_BGR2RGB)
 
 
-def lidar_to_bird_view_image():
-    pass 
+def lidar_to_bird_view_image(lidar, factor=1):
+    # Input:
+    #   lidar: (N', 4)
+    # Output:
+    #   birdview: (w, l, 3)
+    birdview = np.zeros(
+        (cfg.INPUT_HEIGHT * factor, cfg.INPUT_WIDTH * factor, 1))
+    for point in lidar:
+        x, y = point[0:2]
+        if cfg.X_MIN < x < cfg.X_MAX and cfg.Y_MIN < y < cfg.Y_MAX:
+            x, y = int((x - cfg.X_MIN) / cfg.VOXEL_X_SIZE *
+                       factor), int((y - cfg.Y_MIN) / cfg.VOXEL_Y_SIZE * factor)
+            birdview[y, x] += 1
+    birdview = birdview - np.min(birdview)
+    divisor = np.max(birdview) - np.min(birdview)
+    # TODO: adjust this factor
+    birdview = np.clip((birdview / divisor * 255) *
+                       5 * factor, a_min = 0, a_max = 255)
+    birdview = np.tile(birdview, 3).astype(np.uint8)
+
+    return birdview
 
 
-def draw_lidar_box_3d_on_birdview():
-    pass 
+def draw_lidar_box_3d_on_birdview(
+    birdview, boxes3d, gt_boxes3d=np.array([]), 
+    color=(0,255,255), gt_color=(255,0,255), thickness=1, 
+    factor=1, P2=None, T_VELO_2_CAM=None, R_RECT_0=None):
+
+    # Input:
+    #   birdview: (h, w, 3)
+    #   boxes3d (N, 7) [x, y, z, h, w, l, r]
+    #   scores
+    #   gt_boxes3d (N, 7) [x, y, z, h, w, l, r]
+    img = birdview.copy()
+    corner_boxes3d = center_to_corner_box3d(boxes3d, coordinate = 'lidar', T_VELO_2_CAM = T_VELO_2_CAM, R_RECT_0 = R_RECT_0)
+    corner_gt_boxes3d = center_to_corner_box3d(gt_boxes3d, coordinate = 'lidar', T_VELO_2_CAM = T_VELO_2_CAM, R_RECT_0 = R_RECT_0)
+    # draw gt
+    for box in corner_gt_boxes3d:
+        x0, y0 = lidar_to_bird_view(*box[0, 0:2], factor = factor)
+        x1, y1 = lidar_to_bird_view(*box[1, 0:2], factor = factor)
+        x2, y2 = lidar_to_bird_view(*box[2, 0:2], factor = factor)
+        x3, y3 = lidar_to_bird_view(*box[3, 0:2], factor = factor)
+
+        cv2.line(img, (int(x0), int(y0)), (int(x1), int(y1)),
+                 gt_color, thickness, cv2.LINE_AA)
+        cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)),
+                 gt_color, thickness, cv2.LINE_AA)
+        cv2.line(img, (int(x2), int(y2)), (int(x3), int(y3)),
+                 gt_color, thickness, cv2.LINE_AA)
+        cv2.line(img, (int(x3), int(y3)), (int(x0), int(y0)),
+                 gt_color, thickness, cv2.LINE_AA)
+
+    # draw detections
+    for box in corner_boxes3d:
+        x0, y0 = lidar_to_bird_view(*box[0, 0:2], factor = factor)
+        x1, y1 = lidar_to_bird_view(*box[1, 0:2], factor = factor)
+        x2, y2 = lidar_to_bird_view(*box[2, 0:2], factor = factor)
+        x3, y3 = lidar_to_bird_view(*box[3, 0:2], factor = factor)
+
+        cv2.line(img, (int(x0), int(y0)), (int(x1), int(y1)),
+                 color, thickness, cv2.LINE_AA)
+        cv2.line(img, (int(x1), int(y1)), (int(x2), int(y2)),
+                 color, thickness, cv2.LINE_AA)
+        cv2.line(img, (int(x2), int(y2)), (int(x3), int(y3)),
+                 color, thickness, cv2.LINE_AA)
+        cv2.line(img, (int(x3), int(y3)), (int(x0), int(y0)),
+                 color, thickness, cv2.LINE_AA)
+
+    return cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_BGR2RGB)
 
 
-def colorize():
-    pass 
+def lidar_to_bird_view(x, y, factor=1):
+    # using the cfg.INPUT_XXX
+    a = (x - cfg.OBJECT.X_MIN) / cfg.OBJECT.VOXEL_X_SIZE * factor
+    b = (y - cfg.OBJECT.Y_MIN) / cfg.OBJECT.VOXEL_Y_SIZE * factor
+    a = np.clip(a, a_max = (cfg.OBJECT.X_MAX - cfg.OBJECT.X_MIN) / cfg.OBJECT.VOXEL_X_SIZE * factor, a_min = 0)
+    b = np.clip(b, a_max = (cfg.OBJECT.Y_MAX - cfg.OBJECT.Y_MIN) / cfg.OBJECT.VOXEL_Y_SIZE * factor, a_min = 0)
+
+    return a, b 
+
+def colorize(value, factor=1, vmin=None, vmax=None):
+    # normalize
+    value = np.sum(value, axis = -1)
+    vmin = np.min(value) if vmin is None else vmin
+    vmax = np.max(value) if vmax is None else vmax
+    value = (value - vmin) / (vmax - vmin)  # vmin..vmax
+
+    value = (value * 255).astype(np.uint8)
+    value = cv2.applyColorMap(value, cv2.COLORMAP_JET)
+    value = cv2.cvtColor(value, cv2.COLOR_BGR2RGB)
+    x, y, _ = value.shape
+    value = cv2.resize(value, (y * factor, x * factor))
+
+    return value
+
+
+
+def box3d_to_label(batch_box3d, batch_cls, batch_score = [], coordinate='camera', P2 = None, T_VELO_2_CAM = None, R_RECT_0 = None):
+    # Input:
+    #   (N, N', 7) x y z h w l r
+    #   (N, N')
+    #   cls: (N, N') 'Car' or 'Pedestrain' or 'Cyclist'
+    #   coordinate(input): 'camera' or 'lidar'
+    # Output:
+    #   label: (N, N') N batches and N lines
+    batch_label = []
+    if batch_score:
+        template = '{} ' + ' '.join(['{:.4f}' for i in range(15)]) + '\n'
+        for boxes, scores, clses in zip(batch_box3d, batch_score, batch_cls):
+            label = []
+            for box, score, cls in zip(boxes, scores, clses):
+                if coordinate == 'camera':
+                    box3d = box
+                    box2d = lidar_box3d_to_camera_box(
+                        camera_to_lidar_box(box[np.newaxis, :].astype(np.float32), T_VELO_2_CAM, R_RECT_0), cal_projection = False,
+                        P2 = P2, T_VELO_2_CAM = T_VELO_2_CAM, R_RECT_0 = R_RECT_0)[0]
+                else:
+                    box3d = lidar_to_camera_box(
+                        box[np.newaxis, :].astype(np.float32), T_VELO_2_CAM, R_RECT_0)[0]
+                    box2d = lidar_box3d_to_camera_box(
+                        box[np.newaxis, :].astype(np.float32), cal_projection = False, P2 = P2, T_VELO_2_CAM = T_VELO_2_CAM, R_RECT_0 = R_RECT_0)[0]
+                x, y, z, h, w, l, r = box3d
+                box3d = [h, w, l, x, y, z, r]
+                label.append(template.format(
+                    cls, 0, 0, 0, *box2d, *box3d, float(score)))
+            batch_label.append(label)
+    else:
+        template = '{} ' + ' '.join(['{:.4f}' for i in range(14)]) + '\n'
+        for boxes, clses in zip(batch_box3d, batch_cls):
+            label = []
+            for box, cls in zip(boxes, clses):
+                if coordinate == 'camera':
+                    box3d = box
+                    box2d = lidar_box3d_to_camera_box(
+                        camera_to_lidar_box(box[np.newaxis, :].astype(np.float32), T_VELO_2_CAM, R_RECT_0),
+                        cal_projection = False,  P2 = P2, T_VELO_2_CAM = T_VELO_2_CAM, R_RECT_0 = R_RECT_0)[0]
+                else:
+                    box3d = lidar_to_camera_box(
+                        box[np.newaxis, :].astype(np.float32), T_VELO_2_CAM, R_RECT_0)[0]
+                    box2d = lidar_box3d_to_camera_box(
+                        box[np.newaxis, :].astype(np.float32), cal_projection = False, P2 = P2, T_VELO_2_CAM = T_VELO_2_CAM, R_RECT_0 = R_RECT_0)[0]
+                x, y, z, h, w, l, r = box3d
+                box3d = [h, w, l, x, y, z, r]
+                label.append(template.format(cls, 0, 0, 0, *box2d, *box3d))
+            batch_label.append(label)
+
+    return np.array(batch_label)
+
+
+def lidar_to_camera_box(boxes, T_VELO_2_CAM = None, R_RECT_0 = None):
+    # (N, 7) -> (N, 7) x,y,z,h,w,l,r
+    ret = []
+    for box in boxes:
+        x, y, z, h, w, l, rz = box
+        (x, y, z), h, w, l, ry = lidar_to_camera(
+            x, y, z, T_VELO_2_CAM, R_RECT_0), h, w, l, -rz - np.pi / 2
+        ry = angle_in_limit(ry)
+        ret.append([x, y, z, h, w, l, ry])
+
+    return np.array(ret).reshape(-1, 7)
 
 
 
