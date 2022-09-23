@@ -1,4 +1,6 @@
+import torch 
 import numpy as np 
+import cv2 
 
 
 def pcl_to_voxels(pcl, target: str, verbose: bool = False) -> dict:
@@ -483,6 +485,200 @@ def deltas_to_boxes_3d(deltas, anchors, cfg, coordinate='lidar'):
     
     return boxes_3d
 
+
+def nms(boxes, scores, overlap: float = 0.5, top_k: int = 200):
+    # Original author: Francisco Massa:
+    # https://github.com/fmassa/object-detection.torch
+    # Ported to PyTorch by Max deGroot (02/01/2017)      
+    
+    keep = scores.new(scores.size(0)).zero_().long()
+    count = 0 
+
+    if boxes.numel() == 0:
+        return keep, count
+    
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+    area = torch.mul(x2 - x1, y2 - y1)
+    v, idx = scores.sort(0)  # sort in ascending order
+    # I = I[v >= 0.01]
+    idx = idx[-top_k:]  # indices of the top-k largest vals
+    xx1 = boxes.new()
+    yy1 = boxes.new()
+    xx2 = boxes.new()
+    yy2 = boxes.new()
+    w = boxes.new()
+    h = boxes.new()
+
+    # keep = torch.Tensor()
+    while idx.numel() > 0:
+        i = idx[-1]  # index of current largest val
+        # keep.append(i)
+        keep[count] = i
+        count += 1
+        if idx.size(0) == 1:
+            break
+        idx = idx[:-1]  # remove kept element from view
+        # load bboxes of next highest vals
+        torch.index_select(x1, 0, idx, out = xx1)
+        torch.index_select(y1, 0, idx, out = yy1)
+        torch.index_select(x2, 0, idx, out = xx2)
+        torch.index_select(y2, 0, idx, out = yy2)
+        # store element-wise max with next highest score
+        xx1 = torch.clamp(xx1, min = x1[i])
+        yy1 = torch.clamp(yy1, min = y1[i])
+        xx2 = torch.clamp(xx2, max = x2[i])
+        yy2 = torch.clamp(yy2, max = y2[i])
+        w.resize_as_(xx2)
+        h.resize_as_(yy2)
+        w = xx2 - xx1
+        h = yy2 - yy1
+        # check sizes of xx1 and xx2.. after each iteration
+        w = torch.clamp(w, min = 0.0)
+        h = torch.clamp(h, min = 0.0)
+        inter = w * h
+        # IoU = i / (area(a) + area(b) - i)
+        rem_areas = torch.index_select(area, 0, idx)  # load remaining areas)
+        union = (rem_areas - inter) + area[i]
+        IoU = inter / union  # store result in iou
+        # keep only elements with an IoU <= overlap
+        idx = idx[IoU.le(overlap)]
+
+    return keep, count 
+
+
+def load_calib(calib_path: str):
+    lines = open(calib_path).readlines() 
+    lines = [line.split()[1:] for line in lines][:-1]
+
+    P = np.array(lines[2]).reshape(3, 4)
+    P = np.concatenate((P, np.array([[0, 0, 0, 0]])), 0)
+
+    Tr_velo_to_cam = np.array(lines[5]).reshape(3, 4)
+    Tr_velo_to_cam = np.concatenate([Tr_velo_to_cam, np.array([0, 0, 0, 1]).reshape(1, 4)], 0)
+
+    R_cam_to_rect = np.eye(4)
+    R_cam_to_rect[:3, :3] = np.array(lines[4][:9]).reshape(3, 3)
+
+    P = P.astype('float32')
+    Tr_velo_to_cam = Tr_velo_to_cam.astype('float32')
+    R_cam_to_rect = R_cam_to_rect.astype('float32')
+
+    return P, Tr_velo_to_cam, R_cam_to_rect
+
+
+def center_to_corner_box3d():
+    
+      
+    
+    pass 
+
+
+def lidar_box3d_to_camera_box(
+    boxes_3d, cal_projection=False, 
+    P2=None, T_VELO_2_CAM=None, R_RECT_0=None):
+    
+    num = len(boxes_3d)
+    boxes2d = np.zeros((num, 4), dtype = np.int32)
+    projections = np.zeros((num, 8, 2), dtype = np.float32)
+
+    lidar_boxes3d_corner = center_to_corner_box3d(boxes_3d, coordinate = 'lidar', T_VELO_2_CAM = T_VELO_2_CAM, R_RECT_0 = R_RECT_0)
+    if type(P2) == type(None):
+        P2 = np.array(cfg.MATRIX_P2)
+
+    for n in range(num):
+        box3d = lidar_boxes3d_corner[n]
+        box3d = lidar_to_camera_point(box3d, T_VELO_2_CAM, R_RECT_0)
+        points = np.hstack((box3d, np.ones((8, 1)))).T  # (8, 4) -> (4, 8)
+        points = np.matmul(P2, points).T
+
+        points = np.nan_to_num(points)
+
+        points[:, 0] /= points[:, 2]
+        points[:, 1] /= points[:, 2]
+
+        projections[n] = points[:, 0:2]
+        minx = 0 if np.isnan(np.min(points[:, 0])) else int(np.min(points[:, 0]))
+        maxx = 0 if np.isnan(np.max(points[:, 0])) else int(np.max(points[:, 0]))
+        miny = 0 if np.isnan(np.min(points[:, 1])) else int(np.min(points[:, 1]))
+        maxy = 0 if np.isnan(np.max(points[:, 1])) else int(np.max(points[:, 1]))
+
+        boxes2d[n, :] = minx, miny, maxx, maxy
+
+    return projections if cal_projection else boxes2d 
+
+
+def draw_lidar_box_3d_on_image(
+    img, 
+    boxes_3d, 
+    gt_boxes_3d=np.array([]), 
+    color=(0, 255, 255), 
+    gt_color=(255,0,255), 
+    thickness=1, 
+    P2=None, 
+    T_VELO_2_CAM=None, 
+    R_RECT_0=None,
+):
+    img = img.copy()
+    projections = lidar_box3d_to_camera_box(
+        boxes_3d, 
+        cal_projection = True, 
+        P2 = P2, 
+        T_VELO_2_CAM = T_VELO_2_CAM, 
+        R_RECT_0 = R_RECT_0,
+    )
+    gt_projections = lidar_box3d_to_camera_box(
+        gt_boxes_3d, 
+        cal_projection = True, 
+        P2 = P2, 
+        T_VELO_2_CAM = T_VELO_2_CAM, 
+        R_RECT_0 = R_RECT_0,
+    )
+
+    # Draw projections
+    for qs in projections:
+        for k in range(0, 4):
+            i, j = k, (k + 1) % 4
+            cv2.line(img, (qs[i, 0], qs[i, 1]), (qs[j, 0],
+                                                 qs[j, 1]), color, thickness, cv2.LINE_AA)
+
+            i, j = k + 4, (k + 1) % 4 + 4
+            cv2.line(img, (qs[i, 0], qs[i, 1]), (qs[j, 0],
+                                                 qs[j, 1]), color, thickness, cv2.LINE_AA)
+
+            i, j = k, k + 4
+            cv2.line(img, (qs[i, 0], qs[i, 1]), (qs[j, 0],
+                                                 qs[j, 1]), color, thickness, cv2.LINE_AA)
+    # Draw gt projections
+    for qs in gt_projections:
+        for k in range(0, 4):
+            i, j = k, (k + 1) % 4
+            cv2.line(img, (qs[i, 0], qs[i, 1]), (qs[j, 0],
+                                                 qs[j, 1]), gt_color, thickness, cv2.LINE_AA)
+
+            i, j = k + 4, (k + 1) % 4 + 4
+            cv2.line(img, (qs[i, 0], qs[i, 1]), (qs[j, 0],
+                                                 qs[j, 1]), gt_color, thickness, cv2.LINE_AA)
+
+            i, j = k, k + 4
+            cv2.line(img, (qs[i, 0], qs[i, 1]), (qs[j, 0],
+                                                 qs[j, 1]), gt_color, thickness, cv2.LINE_AA)
+
+    return cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_BGR2RGB)
+
+
+def lidar_to_bird_view_image():
+    pass 
+
+
+def draw_lidar_box_3d_on_birdview():
+    pass 
+
+
+def colorize():
+    pass 
 
 
 

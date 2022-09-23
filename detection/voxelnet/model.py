@@ -1,12 +1,21 @@
-from turtle import pos
+import os 
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F 
 import numpy as np 
 
 from config import get_cfg_defaults
-from detection.voxelnet.utils import label_to_gt_box_3d
-from utils import generate_anchors, generate_targets, deltas_to_boxes_3d
+from detection.voxelnet.utils import (
+    center_to_corner_box_2d, 
+    corner_to_standup_box2d, 
+    label_to_gt_box_3d, 
+    nms, 
+    generate_anchors, 
+    generate_targets, 
+    deltas_to_boxes_3d,
+    load_calib, 
+    draw_lidar_box_3d_on_image,
+)
 from loss import smooth_L1_loss 
 
 
@@ -261,10 +270,10 @@ class RPN3D(nn.Module):
 
 
     def forward(self, x, device):
-        label = x[0]
-        voxel_features = x[1]
-        #voxel_numbers = x[2]
-        voxel_coordinates = x[3]
+        label = x[1]
+        voxel_features = x[2]
+        #voxel_numbers = x[3]
+        voxel_coordinates = x[4]
         voxel_features = [f.to(device) for f in voxel_features]
         voxel_coordinates = [c.to(device) for c in voxel_coordinates]
 
@@ -331,13 +340,14 @@ class RPN3D(nn.Module):
 
     def predict(self, data, probs, deltas, summary=False, visual=False):
 
-        device = probs.device         
-        label = data[0]
-        voxel_features = data[1]
-        voxel_numbers = data[2]
-        voxel_coordinates = data[3]
-        rgb = data[4]
-        raw_lidar = data[5]
+        device = probs.device   
+        tag = data[0]      
+        label = data[1]
+        voxel_features = data[2]
+        voxel_numbers = data[3]
+        voxel_coordinates = data[4]
+        rgb = data[5]
+        raw_lidar = data[6]
 
         batch_size = probs.shape[0]
         batch_gt_boxes_3d = None 
@@ -357,7 +367,53 @@ class RPN3D(nn.Module):
         ret_score = []
 
         for batch_id in range(batch_size):
+            # remove boxes with low scores 
+            idx = np.where(batch_probs[batch_id, :] >= cfg.RPN.SCORE_THRES)[0]
+            tmp_boxes_3d = batch_boxes_3d[batch_id, idx, ...]
+            tmp_boxes_2d = batch_boxes_2d[batch_id, idx, ...]
+            tmp_scores = batch_probs[batch_id, idx]
+
+            boxes_2d = corner_to_standup_box2d(
+                center_to_corner_box_2d(tmp_boxes_2d, coordinate='lidar')
+            )
+
+            idx, cnt = nms(
+                torch.from_numpy(boxes_2d).to(device), 
+                torch.from_numpy(tmp_scores).to(device), 
+                cfg.RPN.NMS_THRES, 
+                cfg.RPN.NMS_POST_TOPK,
+            )  
+
+            idx = idx[:cnt].cpu().detach().numpy()
+
+            tmp_boxes_3d = tmp_boxes_3d[idx, ...]
+            tmp_scores = tmp_scores[idx]
+            ret_box_3d.append(tmp_boxes_3d)
+            ret_score.append(tmp_scores)
+
+        ret_box_3d_score = []
+        for boxes_3d, scores in zip(ret_box_3d, ret_score):
+            ret_box_3d_score.append(np.concatenate(
+                [np.tile(self.cls_name, len(boxes_3d))[:, np.newaxis], 
+                boxes_3d, scores[:, np.newaxis]], axis=-1
+            ))
+        
+        if summary:
             pass 
+
+        if visual:
+            front_images, bird_views, heatmaps = [], [], []
+            for i in range(len(rgb)):
+                cur_tag = tag[i]
+                P, Tr, R = load_calib(os.path.join(cfg.DATA.CALIB_DIR, cur_tag + '.txt'))
+                
+                front_image = draw_lidar_box_3d_on_image(
+                    rgb[i], ret_box_3d[i],  batch_gt_boxes_3d[i], 
+                    P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
+            
+            
+
+
 
 
 

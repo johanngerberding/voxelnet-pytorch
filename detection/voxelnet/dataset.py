@@ -31,6 +31,7 @@ class KITTIDataset(data.Dataset):
     def __getitem__(self, idx):
         index = self.indices[idx]
         img = cv2.imread(self.images[index]) 
+        tag = os.path.split(self.images[index])[1][:-4] 
         pcl = np.fromfile(self.pcls[index], dtype=np.float32).reshape(-1, 4)
         
         if not self.test: 
@@ -40,7 +41,7 @@ class KITTIDataset(data.Dataset):
 
         voxels = pcl_to_voxels(pcl, 'Car', False) 
 
-        return img, pcl, labels, voxels 
+        return tag, img, pcl, labels, voxels 
 
 
     def __len__(self):
@@ -58,14 +59,16 @@ def collate_fn(parts: tuple) -> tuple:
         tuple: Labels, Voxel-Features, Voxel-Numbers, 
         Voxel-Coordinates, RGB image, Raw Lidar 
     """
-    rgb = [p[0] for p in parts] 
-    raw_lidar = [p[1] for p in parts]
-    label = [p[2] for p in parts] 
-    voxel = [p[3] for p in parts] 
+    tag = [p[0] for p in parts]
+    rgb = [p[1] for p in parts] 
+    raw_lidar = [p[2] for p in parts]
+    label = [p[3] for p in parts] 
+    voxel = [p[4] for p in parts] 
 
     voxel_features, voxel_numbers, voxel_coordinates = prepare_voxel(voxel) 
     
     outs = (
+        tag,
         np.array(label, dtype=object),
         [torch.from_numpy(f) for f in voxel_features], 
         np.array(voxel_numbers, dtype=object),
