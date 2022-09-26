@@ -268,7 +268,7 @@ class RPN3D(nn.Module):
         self.middle_rpn = MiddleConvNet()
         #self.reg_loss_fn = torch.nn.SmoothL1Loss(reduction='sum')
 
-        self.anchors = generate_anchors(cfg)
+        self.anchors = generate_anchors()
         self.rpn_output_shape = self.middle_rpn.output_shape
 
 
@@ -284,7 +284,7 @@ class RPN3D(nn.Module):
         prob_out, delta_out = self.middle_rpn(features)
 
         # calculate the ground truth
-        pos_equal_one, neg_equal_one, targets = generate_targets(label, self.rpn_output_shape, self.anchors, cfg) 
+        pos_equal_one, neg_equal_one, targets = generate_targets(label, self.rpn_output_shape, self.anchors) 
         pos_equal_one_for_reg = np.concatenate(
             [np.tile(pos_equal_one[..., [0]], 7), np.tile(pos_equal_one[..., [1]], 7)], axis=-1
         )
@@ -346,9 +346,7 @@ class RPN3D(nn.Module):
         device = probs.device   
         tag = data[0]      
         label = data[1]
-        voxel_features = data[2]
-        voxel_numbers = data[3]
-        voxel_coordinates = data[4]
+        
         rgb = data[5]
         raw_lidar = data[6]
 
@@ -361,7 +359,7 @@ class RPN3D(nn.Module):
         probs = probs.cpu().detach().numpy()
         deltas = deltas.cpu().detach().numpy()
 
-        batch_boxes_3d = deltas_to_boxes_3d(deltas, self.anchors, cfg, coordinate='lidar') 
+        batch_boxes_3d = deltas_to_boxes_3d(deltas, self.anchors) 
         batch_boxes_2d = batch_boxes_3d[:, :, [0, 1, 4, 5, 6]] 
         batch_probs = probs.reshape((batch_size, -1))
 
@@ -402,19 +400,18 @@ class RPN3D(nn.Module):
             ))
         
         if summary:
-            cur_tag = tag[i]
-            P, Tr, R = load_calib(os.path.join(cfg.DATA.CALIB_DIR, cur_tag + '.txt'))
-            
+            P, Tr, R = load_calib(os.path.join(cfg.DATA.CALIB_DIR, tag[0] + '.txt'))
+
             front_image = draw_lidar_box_3d_on_image(
-                rgb[i], ret_box_3d[i],  batch_gt_boxes_3d[i], 
+                rgb[0], ret_box_3d[0],  batch_gt_boxes_3d[0], 
                 P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
 
-            birdview = lidar_to_bird_view_image(raw_lidar[i], factor=1) 
+            birdview = lidar_to_bird_view_image(raw_lidar[0], factor=1) 
             birdview = draw_lidar_box_3d_on_birdview(
-                birdview, ret_box_3d[i], batch_gt_boxes_3d[i], factor=1, 
+                birdview, ret_box_3d[0], batch_gt_boxes_3d[0], factor=1, 
                 P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
             
-            heatmap = colorize(probs[i, ...], 1)
+            heatmap = colorize(probs[0, ...], 1)
 
             ret_summary = [
                 ['predict/front_view_rgb', front_image[np.newaxis, ...]],

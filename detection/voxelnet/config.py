@@ -9,6 +9,8 @@ _C.SYSTEM.NUM_WORKERS = 4
 
 _C.DATA = CN()
 _C.DATA.DIR= "/data/kitti/3d_vision/data/MD_KITTI"
+_C.DATA.CALIB_DIR= "/data/kitti/3d_vision/data/KITTI/training/calib"
+
 
 _C.TRAIN = CN()
 _C.TRAIN.BATCH_SIZE = 1

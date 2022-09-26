@@ -1,6 +1,9 @@
 import os 
 import argparse
 import sys
+import warnings 
+warnings.simplefilter("ignore")
+
 import torch 
 import datetime 
 from torch.utils.data import DataLoader
@@ -27,10 +30,11 @@ def main():
     # argparse stuff  
     summary_interval = 100 # iterations!  
     print_interval = 100 # iterations 
-    val_epoch = 10 
+    val_epoch = 1 
     start_epoch = 0 
     global_counter = 0 
-    summary_val_interval = 300
+    summary_val_interval = 100
+    vis = True
     min_loss = sys.float_info.max
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -150,7 +154,8 @@ def main():
                     })
 
                     try: 
-                        tags, ret_box3d_scores, ret_summary = model.predict(val_data, probs, deltas, summary=True)
+                        tags, ret_box3d_scores, ret_summary = model.predict(
+                            val_data, probs, deltas, summary=True, visual=True)
 
                         for (tag, img) in ret_summary:
                             img = img[0].transpose(2, 0 ,1)
@@ -167,29 +172,30 @@ def main():
         min_loss = min(avg_val_loss, min_loss)
         save_checkpoint(model, is_best, checkpoints_dir, epoch)
 
-        val_epoch = 1
-        vis = True 
         if (epoch + 1) % val_epoch == 0:   # Time consuming
 
             model.train(False)  # Validation mode
 
             with torch.no_grad():
                 for (i, val_data) in enumerate(val_dataloader):
-
                     # Forward pass for validation and prediction
-                    probs, deltas, val_loss, val_cls_loss, val_reg_loss, cls_pos_loss_rec, cls_neg_loss_rec = model(val_data)
+                    probs, deltas, val_loss, val_cls_loss, val_reg_loss, cls_pos_loss_rec, cls_neg_loss_rec = model(val_data, device)
 
                     front_images, bird_views, heatmaps = None, None, None
                     if vis:
                         tags, ret_box3d_scores, front_images, bird_views, heatmaps = \
-                            model.module.predict(val_data, probs, deltas, summary = False, vis = True)
+                            model.predict(val_data, probs, deltas, summary=False, visual=True)
                     else:
-                        tags, ret_box3d_scores = model.module.predict(val_data, probs, deltas, summary = False, vis = False)
+                        tags, ret_box3d_scores = model.predict(
+                            val_data, probs, deltas, summary=False, visual=False)
 
                     # tags: (N)
                     # ret_box3d_scores: (N, N'); (class, x, y, z, h, w, l, rz, score)
                     for tag, score in zip(tags, ret_box3d_scores):
-                        output_path = os.path.join(vis_output_dir, str(epoch + 1), 'data', tag + '.txt')
+                        output_path = os.path.join(exp_dir, str(epoch + 1), 'data', tag + '.txt')
+                        vis_outdir = os.path.split(output_path)[0]
+                        os.makedirs(vis_outdir, exist_ok=True) 
+                        
                         with open(output_path, 'w+') as f:
                             labels = box3d_to_label([score[:, 1:8]], [score[:, 0]], [score[:, -1]], coordinate = 'lidar')[0]
                             for line in labels:
@@ -199,9 +205,10 @@ def main():
                     # Dump visualizations
                     if vis:
                         for tag, front_image, bird_view, heatmap in zip(tags, front_images, bird_views, heatmaps):
-                            front_img_path = os.path.join(vis_output_dir, str(epoch + 1), 'vis', tag + '_front.jpg')
-                            bird_view_path = os.path.join(vis_output_dir, str(epoch + 1), 'vis', tag + '_bv.jpg')
-                            heatmap_path = os.path.join(vis_output_dir, str(epoch + 1), 'vis', tag + '_heatmap.jpg')
+                            front_img_path = os.path.join(exp_dir, str(epoch + 1), 'vis', tag + '_front.jpg')
+                            bird_view_path = os.path.join(exp_dir, str(epoch + 1), 'vis', tag + '_bv.jpg')
+                            heatmap_path = os.path.join(exp_dir, str(epoch + 1), 'vis', tag + '_heatmap.jpg')
+                            os.makedirs(os.path.split(heatmap_path)[0], exist_ok=True) 
                             cv2.imwrite(front_img_path, front_image)
                             cv2.imwrite(bird_view_path, bird_view)
                             cv2.imwrite(heatmap_path, heatmap)
@@ -210,9 +217,6 @@ def main():
 
     print("Training finished.")
     summary.close()
-
-
-
 
 
 
