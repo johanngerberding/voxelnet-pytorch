@@ -6,6 +6,9 @@ import torch
 from torch.utils import data 
 
 from utils import pcl_to_voxels 
+from config import get_cfg_defaults 
+
+cfg = get_cfg_defaults()
 
 
 class KITTIDataset(data.Dataset):
@@ -14,7 +17,7 @@ class KITTIDataset(data.Dataset):
         self.shuffle = shuffle 
         self.test = test 
         
-        self.images = glob.glob(os.path.join(self.data_dir, "image_2")+ "/*.png")
+        self.images = glob.glob(os.path.join(self.data_dir, "image_2") + "/*.png")
         self.pcls = glob.glob(os.path.join(self.data_dir, "velodyne") + "/*.bin")
         self.labels = glob.glob(os.path.join(self.data_dir, "label_2") + "/*.txt")
         self.images = list(sorted(self.images)) 
@@ -26,7 +29,6 @@ class KITTIDataset(data.Dataset):
         self.indices = list(range(len(self.images)))
         if self.shuffle:
             np.random.shuffle(self.indices)
-
     
     def __getitem__(self, idx):
         index = self.indices[idx]
@@ -42,7 +44,6 @@ class KITTIDataset(data.Dataset):
         voxels = pcl_to_voxels(pcl, 'Car', False) 
 
         return tag, img, pcl, labels, voxels 
-
 
     def __len__(self):
         return len(self.images) 
@@ -79,7 +80,6 @@ def collate_fn(parts: tuple) -> tuple:
     return outs 
 
 
-
 # there is for sure a way to do this more efficient
 def prepare_voxel(voxels: dict) -> tuple:
      
@@ -100,6 +100,28 @@ def prepare_voxel(voxels: dict) -> tuple:
         ) # from (K, 3) to (K, 4)
 
     return features, numbers, coordinates
+
+
+def pcl_augmentation(tag: str):
+    np.random.seed()
+
+    rgb = cv2.resize(cv2.imread(
+        os.path.join(cfg.DATA.DIR, 'image_2', tag + '.png')), 
+        (cfg.IMAGE.WIDTH, cfg.IMAGE.HEIGHT)
+    )
+    
+    lidar = np.fromfile(os.path.join(cfg.DATA.DIR, 'velodyne', tag + '.bin'), dtype=np.float32).reshape(-1, 4)
+    label = np.array([line for line in open(os.path.join(
+        cfg.DATA.DIR, 'label_2', tag + '.txt'), 'r').readlines()])
+
+    cls_name = np.array([line.split()[0] for line in label])
+    gt_box_3d = label_to_gt_box(
+        np.array(label)[np.newaxis, :], 
+        cls='', 
+        coordinate='camera',
+    )[0]
+
+    return rgb
 
 
 def test():
@@ -131,7 +153,6 @@ def test():
         print(len(voxel_coordinates))
         print(len(voxel_features)) 
         break
-
 
 
 if __name__ == "__main__":

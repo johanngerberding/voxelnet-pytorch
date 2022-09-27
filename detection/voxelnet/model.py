@@ -406,12 +406,12 @@ class RPN3D(nn.Module):
                 rgb[0], ret_box_3d[0],  batch_gt_boxes_3d[0], 
                 P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
 
-            birdview = lidar_to_bird_view_image(raw_lidar[0], factor=1) 
+            birdview = lidar_to_bird_view_image(raw_lidar[0], factor=4) 
             birdview = draw_lidar_box_3d_on_birdview(
-                birdview, ret_box_3d[0], batch_gt_boxes_3d[0], factor=1, 
+                birdview, ret_box_3d[0], batch_gt_boxes_3d[0], factor=4, 
                 P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
             
-            heatmap = colorize(probs[0, ...], 1)
+            heatmap = colorize(probs[0, ...], 4)
 
             ret_summary = [
                 ['predict/front_view_rgb', front_image[np.newaxis, ...]],
@@ -431,12 +431,12 @@ class RPN3D(nn.Module):
                     rgb[i], ret_box_3d[i],  batch_gt_boxes_3d[i], 
                     P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
 
-                birdview = lidar_to_bird_view_image(raw_lidar[i], factor=1) 
+                birdview = lidar_to_bird_view_image(raw_lidar[i], factor=4) 
                 birdview = draw_lidar_box_3d_on_birdview(
-                    birdview, ret_box_3d[i], batch_gt_boxes_3d[i], factor=1, 
+                    birdview, ret_box_3d[i], batch_gt_boxes_3d[i], factor=4, 
                     P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
                 
-                heatmap = colorize(probs[i, ...], 1)
+                heatmap = colorize(probs[i, ...], 4)
 
                 front_images.append(front_image)
                 bird_views.append(birdview)

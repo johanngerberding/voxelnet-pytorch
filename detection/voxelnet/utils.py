@@ -263,10 +263,10 @@ def lidar_to_camera_point(points, T_VELO_2_CAM=None, R_RECT_0=None):
     points = np.hstack([points, np.ones((N, 1))]).T
     
     if type(T_VELO_2_CAM) == type(None):
-        T_VELO_2_CAM = np.array(cfg.MATRIX_T_VELO_2_CAM)
+        T_VELO_2_CAM = np.array(cfg.CALIB.T_VELO_2_CAM)
     
     if type(R_RECT_0) == type(None):
-        R_RECT_0 = np.array(cfg.MATRIX_R_RECT_0)
+        R_RECT_0 = np.array(cfg.CALIB.R_RECT_0)
 
     points = np.matmul(T_VELO_2_CAM, points)
     points = np.matmul(R_RECT_0, points).T
@@ -287,7 +287,7 @@ def lidar_to_camera(x, y, z, T_VELO_2_CAM=None, R_RECT_0=None):
     point = np.array([x, y, z, 1]) 
     point = np.matmul(T_VELO_2_CAM, point)
     point = np.matmul(R_RECT_0, point)
-    point = point[:, :3]
+    point = point[0:3]
 
     return tuple(point) 
 
@@ -633,7 +633,7 @@ def lidar_box3d_to_camera_box(
         R_RECT_0 = R_RECT_0,
     )
     if type(P2) == type(None):
-        P2 = np.array(cfg.MATRIX_P2)
+        P2 = np.array(cfg.CALIB.MATRIX_P2)
 
     for n in range(num):
         box3d = lidar_boxes3d_corner[n]
