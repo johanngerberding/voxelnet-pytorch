@@ -46,9 +46,19 @@ def main():
     train_data_dir = os.path.join(data_dir, 'training')
     val_data_dir = os.path.join(data_dir, 'validation')
     
-    train_dataset = KITTIDataset(train_data_dir, True, False)
+    train_dataset = KITTIDataset(
+        data_dir=train_data_dir, 
+        shuffle=True, 
+        augment=True, 
+        test=False, 
+    )
     print(f"Len Train Dataset: {len(train_dataset)}") 
-    val_dataset = KITTIDataset(val_data_dir, False, False)     
+    val_dataset = KITTIDataset(
+        data_dir=val_data_dir, 
+        shuffle=False, 
+        augment=False, 
+        test=False,
+    )     
     print(f"Len Val Dataset: {len(val_dataset)}")
 
     train_dataloader = DataLoader(

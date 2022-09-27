@@ -13,8 +13,10 @@ from utils import (
     center_to_corner_box3d,
     lidar_to_camera_point,
     angle_in_limit,
-) 
-
+    lidar_to_camera_box,
+    box3d_to_label,
+    center_to_corner_box_2d,
+)
 
 from config import get_cfg_defaults 
 
@@ -22,10 +24,11 @@ cfg = get_cfg_defaults()
 
 
 class KITTIDataset(data.Dataset):
-    def __init__(self, data_dir: str, shuffle=True, test=False):
+    def __init__(self, data_dir: str, shuffle=True, augment=True, test=False):
         self.data_dir = data_dir
         self.shuffle = shuffle 
-        self.test = test 
+        self.test = test
+        self.augment = augment
         
         self.images = glob.glob(os.path.join(self.data_dir, "image_2") + "/*.png")
         self.pcls = glob.glob(os.path.join(self.data_dir, "velodyne") + "/*.bin")
@@ -42,16 +45,20 @@ class KITTIDataset(data.Dataset):
     
     def __getitem__(self, idx):
         index = self.indices[idx]
-        img = cv2.imread(self.images[index]) 
         tag = os.path.split(self.images[index])[1][:-4] 
-        pcl = np.fromfile(self.pcls[index], dtype=np.float32).reshape(-1, 4)
-        
-        if not self.test: 
-            labels = [line for line in open(self.labels[index], 'r').readlines()]
-        else: 
-            labels = []
+        if not self.augment: 
+            img = cv2.imread(self.images[index]) 
+            pcl = np.fromfile(self.pcls[index], dtype=np.float32).reshape(-1, 4)
+            
+            if not self.test: 
+                labels = [line for line in open(self.labels[index], 'r').readlines()]
+            else: 
+                labels = []
 
-        voxels = pcl_to_voxels(pcl, 'Car', False) 
+            voxels = pcl_to_voxels(pcl, 'Car', False) 
+        
+        else:
+            tag, img, pcl, voxels, labels = pcl_augmentation(tag, self.data_dir) 
 
         return tag, img, pcl, labels, voxels 
 
@@ -112,22 +119,21 @@ def prepare_voxel(voxels: dict) -> tuple:
     return features, numbers, coordinates
 
 
-def pcl_augmentation(tag: str):
+def pcl_augmentation(tag: str, data_dir: str):
     np.random.seed()
 
-    rgb = cv2.resize(cv2.imread(
-        os.path.join(cfg.DATA.DIR, 'image_2', tag + '.png')), 
-        (cfg.IMAGE.WIDTH, cfg.IMAGE.HEIGHT)
-    )
+    rgb = cv2.imread(os.path.join(data_dir, 'image_2', tag + '.png'))
     
-    lidar = np.fromfile(os.path.join(cfg.DATA.DIR, 'velodyne', tag + '.bin'), dtype=np.float32).reshape(-1, 4)
+    lidar = np.fromfile(
+            os.path.join(data_dir, 'velodyne', tag + '.bin'), 
+            dtype=np.float32).reshape(-1, 4)
     label = np.array([line for line in open(os.path.join(
-        cfg.DATA.DIR, 'label_2', tag + '.txt'), 'r').readlines()])
+        data_dir, 'label_2', tag + '.txt'), 'r').readlines()])
 
     cls_name = np.array([line.split()[0] for line in label])
     gt_box_3d = label_to_gt_box_3d(
         np.array(label)[np.newaxis, :], 
-        cls='', 
+        cls_name='', 
         coordinate='camera',
     )[0]
 
@@ -177,27 +183,72 @@ def pcl_augmentation(tag: str):
                 bound_y = np.logical_and(lidar[:, 1] >= miny, lidar[:, 1] <= maxy)
                 bound_z = np.logical_and(lidar[:, 2] >= minz, lidar[:, 2] <= maxz)
                 bound_box = np.logical_and(np.logical_and(bound_x, bound_y), bound_z)
-                lidar[bound_box, 0:3] = point_transform(lidar[bound_box, 0:3], t_x, t_y, t_z, t_rz)
+                lidar[bound_box, 0:3] = point_transform(
+                        lidar[bound_box, 0:3], t_x, t_y, t_z, t_rz)
                 lidar_center_gt_box3d[idx] = box_transform(
                         lidar_center_gt_box3d[[idx]], t_x, t_y, t_z, t_rz, 'lidar')
-        gt_box3d = lidar_to_camera_box(lidar_center_gt_box3d)
+        gt_box_3d = lidar_to_camera_box(lidar_center_gt_box3d)
         newtag = 'aug_{}_1_{}'.format(tag, np.random.randint(1, 1024))
     
     elif choice < 7 and choice >= 4:
         # global rotation 
-        pass 
+        angle = np.random.uniform(-np.pi / 4, np.pi / 4)
+        lidar[:, 0:3] = point_transform(lidar[:, 0:3], 0, 0, 0, rz=angle)
+        lidar_center_gt_box3d = camera_to_lidar_box(gt_box_3d)
+        lidar_center_gt_box3d = box_transform(
+                lidar_center_gt_box3d, 0, 0, 0, angle, coordinate='lidar')
+        gt_box_3d = lidar_to_camera_box(lidar_center_gt_box3d)
+        newtag = 'aug_{}_2_{:.4f}'.format(tag, angle).replace('.', '_')
     
     else:
         # global scaling
-        pass
+        factor = np.random.uniform(0.95, 1.05)
+        lidar[:, 0:3] = lidar[:, 0:3] * factor
+        lidar_center_gt_box3d = camera_to_lidar_box(gt_box_3d)
+        lidar_center_gt_box3d[:, 0:6] = lidar_center_gt_box3d[:, 0:6] * factor 
+        gt_box_3d = lidar_to_camera_box(lidar_center_gt_box3d)
+        newtag = 'aug_{}_3_{:.4f}'.format(tag, factor).replace('.', '_')
+
+    label = box3d_to_label(
+        gt_box_3d[np.newaxis, ...], 
+        cls_name[np.newaxis, ...], 
+        coordinate='camera',
+    )[0]
+    voxel_dict = pcl_to_voxels(lidar, cfg.OBJECT.NAME)
     
-    label = box3d_to_label(gt_box3d[np.newaxis, ...], cls_name[np.newaxis, ...], coordinate='camera')[0]
-    voxel_dict = process_pointcloud()
     return newtag, rgb, lidar, voxel_dict, label 
 
 
-def calc_iou2d():
-    return None 
+def calc_iou2d(box1, box2, T_VELO_2_CAM=None, R_RECT_0=None):
+    buf1 = np.zeros((cfg.IMAGE.HEIGHT, cfg.IMAGE.WIDTH, 3))
+    buf2 = np.zeros((cfg.IMAGE.HEIGHT, cfg.IMAGE.WIDTH, 3))
+    tmp = center_to_corner_box_2d(
+        np.array([box1, box2]), 
+        coordinate = 'lidar', 
+        T_VELO_2_CAM = T_VELO_2_CAM, 
+        R_RECT_0 = R_RECT_0,
+    )
+    box1_corner = batch_lidar_to_birdview(tmp[0]).astype(np.int32)
+    box2_corner = batch_lidar_to_birdview(tmp[1]).astype(np.int32)
+    buf1 = cv2.fillConvexPoly(buf1, box1_corner, color = (1, 1, 1))[..., 0]
+    buf2 = cv2.fillConvexPoly(buf2, box2_corner, color = (1, 1, 1))[..., 0]
+    indiv = np.sum(np.absolute(buf1-buf2))
+    share = np.sum((buf1 + buf2) == 2)
+    if indiv == 0:
+        return 0.0 # when target is out of bound
+
+    return share / (indiv + share)
+
+
+def batch_lidar_to_birdview(points, factor=1):
+    a = (points[:, 0] - cfg.OBJECT.X_MIN) / cfg.OBJECT.X_VOXEL_SIZE * factor
+    b = (points[:, 1] - cfg.OBJECT.Y_MIN) / cfg.OBJECT.Y_VOXEL_SIZE * factor
+    a = np.clip(a, a_max = (cfg.OBJECT.X_MAX - cfg.OBJECT.X_MIN) /\
+            cfg.OBJECT.X_VOXEL_SIZE * factor, a_min = 0)
+    b = np.clip(b, a_max = (cfg.OBJECT.Y_MAX - cfg.OBJECT.Y_MIN) /\
+            cfg.OBJECT.Y_VOXEL_SIZE * factor, a_min = 0)
+
+    return np.concatenate([a[:, np.newaxis], b[:, np.newaxis]], axis = -1)
 
 
 def box_transform(lidar_center_boxes, t_x, t_y, t_z, t_rz, coordinate='lidar'):
