@@ -4,6 +4,7 @@ import sys
 import warnings 
 warnings.simplefilter("ignore")
 
+import numpy as np
 import torch 
 import datetime 
 from torch.utils.data import DataLoader
@@ -27,18 +28,26 @@ def save_checkpoint(model, is_best, checkpoint_dir, epoch):
 
 
 def main():
-    # argparse stuff  
-    summary_interval = 100 # iterations!  
-    print_interval = 100 # iterations 
-    val_epoch = 1 
-    start_epoch = 0 
-    global_counter = 0 
-    summary_val_interval = 100
-    vis = True
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--summary_interval", type=int, default=100)
+    parser.add_argument("--print_interval", type=int, default=100)
+    parser.add_argument("--val_epoch", type=int, default=1)
+    parser.add_argument("--start_epoch", type=int, default=0)
+    parser.add_argument("--global_counter", type=int, default=0)
+    parser.add_argument("--summary_val_interval", type=int, default=100)
+    parser.add_argument("--vis", type=bool, default=True)
+    parser.add_argument("--num_vis_dump", type=int, default=50)
+    parser.add_argument("--gpu", type=bool, default=True)
+    parser.add_argument("--model_checkpoint", type=str, default="")
+    parser.add_argument("--resume", type=bool, default=False)
+
+    args = parser.parse_args()
+    global_counter = args.global_counter 
+    
+    device = torch.device(
+            "cuda" if torch.cuda.is_available() and args.gpu else "cpu")
+
     min_loss = sys.float_info.max
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     cfg = get_cfg_defaults()
     cfg.freeze()
     
@@ -81,9 +90,8 @@ def main():
 
     val_dataloader_iter = iter(val_dataloader)
 
-    model = RPN3D('Car', cfg.TRAIN.ALPHA, cfg.TRAIN.BETA).to(device)
-    model_checkpoint = None 
-    resume = False
+    model = RPN3D(cfg.OBJECT.NAME, cfg.TRAIN.ALPHA, cfg.TRAIN.BETA).to(device)
+    
     exps_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exps")
     if not os.path.isdir(exps_dir):
         os.makedirs(exps_dir)
@@ -108,14 +116,14 @@ def main():
     if not os.path.isdir(vis_output_dir):
         os.makedirs(vis_output_dir) 
     
-    if model_checkpoint and resume: 
+    if args.model_checkpoint and args.resume: 
         raise NotImplementedError
     
     optimizer = torch.optim.SGD(model.parameters(), lr=cfg.TRAIN.LR)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [150])
     summary = SummaryWriter() 
     
-    for epoch in range(start_epoch, cfg.TRAIN.NUM_EPOCHS):
+    for epoch in range(args.start_epoch, cfg.TRAIN.NUM_EPOCHS):
         print("-" * 30) 
         print(f"Epoch {epoch+1}") 
         print("-" * 30) 
@@ -136,12 +144,12 @@ def main():
             optimizer.step()
             optimizer.zero_grad()
 
-            if counter % print_interval == 0:
+            if counter % args.print_interval == 0:
                 print("Train: {} @ epoch: {}/{} - Loss: {:.4f} | Reg Loss: {:.4f} | Cls Loss: {:.4f}".format(
                     counter, epoch + 1, cfg.TRAIN.NUM_EPOCHS, loss.item(), reg_loss.item(), cls_loss.item()
                 ))
             
-            if counter % summary_interval == 0:
+            if counter % args.summary_interval == 0:
                 summary.add_scalars(
                     str(epoch + 1), {
                         'train/loss': loss.item(),
@@ -150,7 +158,7 @@ def main():
                     }, global_counter
                 )
 
-            if counter % summary_val_interval == 0:
+            if counter % args.summary_val_interval == 0:
 
                 with torch.no_grad():
                     model.eval()
@@ -182,23 +190,26 @@ def main():
         min_loss = min(avg_val_loss, min_loss)
         save_checkpoint(model, is_best, checkpoints_dir, epoch)
 
-        if (epoch + 1) % val_epoch == 0:   # Time consuming
+        vis_count = 0
+        if (epoch + 1) % args.val_epoch == 0:   # Time consuming
 
             model.train(False)  # Validation mode
-
+            
             with torch.no_grad():
                 for (i, val_data) in enumerate(val_dataloader):
                     # Forward pass for validation and prediction
                     probs, deltas, val_loss, val_cls_loss, val_reg_loss, cls_pos_loss_rec, cls_neg_loss_rec = model(val_data, device)
 
                     front_images, bird_views, heatmaps = None, None, None
-                    if vis:
+                    if args.vis:
                         tags, ret_box3d_scores, front_images, bird_views, heatmaps = \
                             model.predict(val_data, probs, deltas, summary=False, visual=True)
                     else:
                         tags, ret_box3d_scores = model.predict(
                             val_data, probs, deltas, summary=False, visual=False)
 
+                    #print(f"Heatmaps len: {len(heatmaps)}") 
+                    #print(f"Heatmaps shape: {heatmaps[0].shape}") -> (8, 800, 3) 
                     # tags: (N)
                     # ret_box3d_scores: (N, N'); (class, x, y, z, h, w, l, rz, score)
                     for tag, score in zip(tags, ret_box3d_scores):
@@ -210,19 +221,39 @@ def main():
                             labels = box3d_to_label([score[:, 1:8]], [score[:, 0]], [score[:, -1]], coordinate = 'lidar')[0]
                             for line in labels:
                                 f.write(line)
-                            print('Write out {} objects to {}'.format(len(labels), tag))
-
+                            #print('Write out {} objects to {}'.format(
+                                #len(labels), tag))
+                    
                     # Dump visualizations
-                    if vis:
-                        for tag, front_image, bird_view, heatmap in zip(tags, front_images, bird_views, heatmaps):
-                            front_img_path = os.path.join(exp_dir, str(epoch + 1), 'vis', tag + '_front.jpg')
-                            bird_view_path = os.path.join(exp_dir, str(epoch + 1), 'vis', tag + '_bv.jpg')
-                            heatmap_path = os.path.join(exp_dir, str(epoch + 1), 'vis', tag + '_heatmap.jpg')
-                            os.makedirs(os.path.split(heatmap_path)[0], exist_ok=True) 
+                    if args.vis and vis_count < args.num_vis_dump:
+                        for tag, front_image, bird_view, heatmap in zip(tags, front_images, bird_views, heatmaps): 
+                            vis_count += 1 
+                            front_img_path = os.path.join(
+                                exp_dir, 
+                                str(epoch + 1), 
+                                'vis', 
+                                tag + '_front.jpg',
+                            )
+                            bird_view_path = os.path.join(
+                                exp_dir, 
+                                str(epoch + 1), 
+                                'vis', 
+                                tag + '_bv.jpg',
+                            )
+                            heatmap_path = os.path.join(
+                                exp_dir, 
+                                str(epoch + 1), 
+                                'vis', 
+                                tag + '_heatmap.jpg',
+                            )
+                            os.makedirs(
+                                os.path.split(heatmap_path)[0], 
+                                exist_ok=True,
+                            ) 
                             cv2.imwrite(front_img_path, front_image)
                             cv2.imwrite(bird_view_path, bird_view)
                             cv2.imwrite(heatmap_path, heatmap)
-
+                    
         lr_scheduler.step()
 
     print("Training finished.")

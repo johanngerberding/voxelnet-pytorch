@@ -14,11 +14,11 @@ _C.DATA.CALIB_DIR= "/data/kitti/3d_vision/data/KITTI/training/calib"
 
 _C.TRAIN = CN()
 _C.TRAIN.BATCH_SIZE = 1
-_C.TRAIN.NUM_WORKERS = 4
+_C.TRAIN.NUM_WORKERS = 8
 _C.TRAIN.LR = 0.01 
 _C.TRAIN.ALPHA = 1.5
 _C.TRAIN.BETA = 1
-_C.TRAIN.NUM_EPOCHS = 20  
+_C.TRAIN.NUM_EPOCHS = 10  
 
 
 _C.VAL = CN()
