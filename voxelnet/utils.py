@@ -1,7 +1,6 @@
 import torch 
 import numpy as np 
 import cv2 
-import math 
 
 
 from config import get_cfg_defaults
@@ -799,6 +798,7 @@ def lidar_to_bird_view(x, y, factor=1):
 
     return a, b 
 
+
 def colorize(value, factor=1, vmin=None, vmax=None):
     # normalize
     value = np.sum(value, axis=0)
@@ -809,11 +809,10 @@ def colorize(value, factor=1, vmin=None, vmax=None):
     value = (value * 255).astype(np.uint8)
     value = cv2.applyColorMap(value, cv2.COLORMAP_JET)
     value = cv2.cvtColor(value, cv2.COLOR_BGR2RGB)
-    x, y, _ = value.shape
-    value = cv2.resize(value, (int(y * factor), int(x * factor)))
+    w, h = value.shape
+    value = cv2.resize(value, (int(w * factor), int(h * factor)))
 
     return value
-
 
 
 def box3d_to_label(batch_box3d, batch_cls, batch_score = [], coordinate='camera', P2 = None, T_VELO_2_CAM = None, R_RECT_0 = None):
