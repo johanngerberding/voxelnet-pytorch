@@ -2,9 +2,7 @@ import os
 import argparse
 import sys
 import warnings 
-warnings.simplefilter("ignore")
-
-import numpy as np
+import time  
 import torch 
 import datetime 
 from torch.utils.data import DataLoader
@@ -17,6 +15,8 @@ from config import get_cfg_defaults
 from model import RPN3D
 from dataset import KITTIDataset, collate_fn
 from utils import box3d_to_label
+
+warnings.simplefilter("ignore")
 
 
 def save_checkpoint(model, is_best, checkpoint_dir, epoch):
@@ -40,6 +40,7 @@ def main():
     parser.add_argument("--gpu", type=bool, default=True)
     parser.add_argument("--model_checkpoint", type=str, default="")
     parser.add_argument("--resume", type=bool, default=False)
+    parser.add_argument("--cfg", type=str, default=None) 
 
     args = parser.parse_args()
     global_counter = args.global_counter 
@@ -49,8 +50,11 @@ def main():
 
     min_loss = sys.float_info.max
     cfg = get_cfg_defaults()
+    if args.cfg: 
+        cfg.merge_from_file(args.cfg)
     cfg.freeze()
-    
+    print(cfg)
+
     data_dir = cfg.DATA.DIR 
     train_data_dir = os.path.join(data_dir, 'training')
     val_data_dir = os.path.join(data_dir, 'validation')
@@ -105,25 +109,31 @@ def main():
     os.makedirs(exp_dir) 
 
     checkpoints_dir = os.path.join(exp_dir, "checkpoints")
-    if not os.path.isdir(checkpoints_dir):
-        os.makedirs(checkpoints_dir)
+    os.makedirs(checkpoints_dir, exist_ok=True)
 
     log_dir = os.path.join(exp_dir, "logs")
-    if not os.path.isdir(log_dir):
-        os.makedirs(log_dir)
+    os.makedirs(log_dir, exist_ok=True)
 
     vis_output_dir = os.path.join(exp_dir, "vis") 
-    if not os.path.isdir(vis_output_dir):
-        os.makedirs(vis_output_dir) 
+    os.makedirs(vis_output_dir, exist_ok=True) 
     
+    # model predictions output dir
+    preds_dir = os.path.join(exp_dir, "preds")
+    os.makedirs(preds_dir, exist_ok=True)
+
+    with open(os.path.join(exp_dir, "config.yaml"), 'w') as fp:
+        fp.write(cfg.dump())
+
     if args.model_checkpoint and args.resume: 
         raise NotImplementedError
     
     optimizer = torch.optim.SGD(model.parameters(), lr=cfg.TRAIN.LR)
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [150])
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer, [cfg.TRAIN.LR_SCHEDULER_STEP])
     summary = SummaryWriter() 
-    
+
     for epoch in range(args.start_epoch, cfg.TRAIN.NUM_EPOCHS):
+        epoch_start = time.time() 
         print("-" * 30) 
         print(f"Epoch {epoch+1}") 
         print("-" * 30) 
@@ -131,7 +141,7 @@ def main():
 
         tot_val_loss = 0
         tot_val_times = 0
-
+        print_time_start = time.time() 
         for (i, data) in enumerate(train_dataloader):
             counter += 1  
             global_counter += 1  
@@ -140,14 +150,16 @@ def main():
             _, _, loss, cls_loss, reg_loss, cls_pos_loss_rec, cls_neg_loss_rec = model(data, device)
             loss.backward()
             # gradient clipping 
-            clip_grad_norm_(model.parameters(), 5)
+            clip_grad_norm_(model.parameters(), cfg.TRAIN.GRADIENT_CLIP)
             optimizer.step()
             optimizer.zero_grad()
 
             if counter % args.print_interval == 0:
-                print("Train: {} @ epoch: {}/{} - Loss: {:.4f} | Reg Loss: {:.4f} | Cls Loss: {:.4f}".format(
-                    counter, epoch + 1, cfg.TRAIN.NUM_EPOCHS, loss.item(), reg_loss.item(), cls_loss.item()
+                print_time_elapsed = time.time() - print_time_start 
+                print("Train: {} @ epoch: {}/{} - Loss: {:.4f} | Reg Loss: {:.4f} | Cls Loss: {:.4f} | Time: {} mins".format(
+                    counter, epoch + 1, cfg.TRAIN.NUM_EPOCHS, loss.item(), reg_loss.item(), cls_loss.item(), int(print_time_elapsed / 60)
                 ))
+                print_time_start = time.time()
             
             if counter % args.summary_interval == 0:
                 summary.add_scalars(
@@ -159,7 +171,7 @@ def main():
                 )
 
             if counter % args.summary_val_interval == 0:
-
+                
                 with torch.no_grad():
                     model.eval()
                     val_data = next(val_dataloader_iter)
@@ -178,8 +190,7 @@ def main():
                         for (tag, img) in ret_summary:
                             img = img[0].transpose(2, 0 ,1)
                             summary.add_image(tag, img, global_counter)
-
-                    except: 
+                    except:
                         raise Exception("Prediction skipped due to an error!")
                     
                     tot_val_loss += val_loss.item()
@@ -189,7 +200,7 @@ def main():
         is_best = avg_val_loss < min_loss 
         min_loss = min(avg_val_loss, min_loss)
         save_checkpoint(model, is_best, checkpoints_dir, epoch)
-
+        
         vis_count = 0
         if (epoch + 1) % args.val_epoch == 0:   # Time consuming
 
@@ -208,12 +219,10 @@ def main():
                         tags, ret_box3d_scores = model.predict(
                             val_data, probs, deltas, summary=False, visual=False)
 
-                    #print(f"Heatmaps len: {len(heatmaps)}") 
-                    #print(f"Heatmaps shape: {heatmaps[0].shape}") -> (8, 800, 3) 
                     # tags: (N)
                     # ret_box3d_scores: (N, N'); (class, x, y, z, h, w, l, rz, score)
                     for tag, score in zip(tags, ret_box3d_scores):
-                        output_path = os.path.join(exp_dir, str(epoch + 1), 'data', tag + '.txt')
+                        output_path = os.path.join(preds_dir, str(epoch + 1), 'data', tag + '.txt')
                         vis_outdir = os.path.split(output_path)[0]
                         os.makedirs(vis_outdir, exist_ok=True) 
                         
@@ -221,27 +230,25 @@ def main():
                             labels = box3d_to_label([score[:, 1:8]], [score[:, 0]], [score[:, -1]], coordinate = 'lidar')[0]
                             for line in labels:
                                 f.write(line)
-                            #print('Write out {} objects to {}'.format(
-                                #len(labels), tag))
                     
                     # Dump visualizations
                     if args.vis and vis_count < args.num_vis_dump:
                         for tag, front_image, bird_view, heatmap in zip(tags, front_images, bird_views, heatmaps): 
                             vis_count += 1 
                             front_img_path = os.path.join(
-                                exp_dir, 
+                                vis_output_dir, 
                                 str(epoch + 1), 
                                 'vis', 
                                 tag + '_front.jpg',
                             )
                             bird_view_path = os.path.join(
-                                exp_dir, 
+                                vis_output_dir, 
                                 str(epoch + 1), 
                                 'vis', 
                                 tag + '_bv.jpg',
                             )
                             heatmap_path = os.path.join(
-                                exp_dir, 
+                                vis_output_dir, 
                                 str(epoch + 1), 
                                 'vis', 
                                 tag + '_heatmap.jpg',
@@ -255,10 +262,11 @@ def main():
                             cv2.imwrite(heatmap_path, heatmap)
                     
         lr_scheduler.step()
+        epoch_elapsed = time.time() - epoch_start
+        print("Epoch {} time: {} seconds".format(epoch + 1, epoch_elapsed))
 
     print("Training finished.")
     summary.close()
-
 
 
 if __name__ == "__main__":

@@ -801,7 +801,7 @@ def lidar_to_bird_view(x, y, factor=1):
 
 def colorize(value, factor=1, vmin=None, vmax=None):
     # normalize
-    value = np.sum(value, axis = -1)
+    value = np.sum(value, axis=0)
     vmin = np.min(value) if vmin is None else vmin
     vmax = np.max(value) if vmax is None else vmax
     value = (value - vmin) / (vmax - vmin)  # vmin..vmax
@@ -810,7 +810,7 @@ def colorize(value, factor=1, vmin=None, vmax=None):
     value = cv2.applyColorMap(value, cv2.COLORMAP_JET)
     value = cv2.cvtColor(value, cv2.COLOR_BGR2RGB)
     x, y, _ = value.shape
-    value = cv2.resize(value, (y * factor, x * factor))
+    value = cv2.resize(value, (int(y * factor), int(x * factor)))
 
     return value
 

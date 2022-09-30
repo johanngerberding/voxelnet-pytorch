@@ -1,5 +1,6 @@
 .env
 .ipynb_checkpoints
 __pycache__
-/detection/voxelnet/exps 
-/detection/voxelnet/runs
+
+voxelnet/exps 
+voxelnet/runs

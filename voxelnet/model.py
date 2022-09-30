@@ -24,6 +24,7 @@ from loss import smooth_L1_loss
 
 cfg = get_cfg_defaults()
 
+
 class VFELayer(nn.Module):
     def __init__(self, cin: int, cout: int):
         super(VFELayer, self).__init__()
@@ -37,7 +38,6 @@ class VFELayer(nn.Module):
             nn.ReLU(),
         )
         self.bn = nn.BatchNorm1d(self.local_agg_features)
-
 
     def forward(self, inputs, mask):
         temp = self.fcn(inputs).transpose(1,2)
@@ -55,7 +55,6 @@ class FeatureLearningNet(nn.Module):
         super(FeatureLearningNet, self).__init__()
         self.vfe_1 = VFELayer(7, 32)
         self.vfe_2 = VFELayer(32, 128)
-    
 
     def forward(self, feature: list, coordinate: list):
         bs = len(feature)
@@ -75,7 +74,6 @@ class FeatureLearningNet(nn.Module):
         outs = outs.to_dense()
 
         return outs
-
 
 
 class ConvMD(nn.Module):
@@ -125,7 +123,6 @@ class ConvMD(nn.Module):
         else: 
             raise ValueError("Choose between 2D and 3D input.")
 
-
     def forward(self, x):
         x = self.conv(x) 
 
@@ -162,7 +159,6 @@ class DeConv2d(nn.Module):
 
         if self.bn: 
             self.batch_norm = nn.BatchNorm2d(self.cout)
-
 
     def forward(self, x):
         x = self.deconv(x)
@@ -226,14 +222,11 @@ class MiddleConvNet(nn.Module):
         self.reg_conv = ConvMD(2, 768, 14, 1, (1, 1), (0, 0), bn=False, activation=False)
         self.output_shape = [cfg.OBJECT.FEATURE_HEIGHT, cfg.OBJECT.FEATURE_WIDTH]
 
-
     def forward(self, x):
         batch_size, _, height, width, _ = x.shape 
         x = x.permute(0, 4, 1, 2, 3) # (B, D, H, W, C) -> (B, C, D, H, W)
         
         x = self.middle_layer(x)
-        #print(f"x shape: {x.size()}")
-        #x = x.view(batch_size, -1, height, width)
         x = x.reshape((batch_size, -1, height, width)) 
         x = self.block1(x) 
         tmp_deconv_1 = self.deconv1(x)
@@ -266,16 +259,13 @@ class RPN3D(nn.Module):
 
         self.feature_net = FeatureLearningNet()
         self.middle_rpn = MiddleConvNet()
-        #self.reg_loss_fn = torch.nn.SmoothL1Loss(reduction='sum')
 
         self.anchors = generate_anchors()
         self.rpn_output_shape = self.middle_rpn.output_shape
 
-
     def forward(self, x, device):
         label = x[1]
         voxel_features = x[2]
-        #voxel_numbers = x[3]
         voxel_coordinates = x[4]
         voxel_features = [f.to(device) for f in voxel_features]
         voxel_coordinates = [c.to(device) for c in voxel_coordinates]
@@ -323,7 +313,6 @@ class RPN3D(nn.Module):
         cls_pos_loss_rec = torch.sum(cls_pos_loss)
         cls_neg_loss_rec = torch.sum(cls_neg_loss)
 
-        #reg_loss = self.reg_loss_fn(delta_out * pos_equal_one_for_reg, targets * pos_equal_one_for_reg) 
         reg_loss = smooth_L1_loss(delta_out * pos_equal_one_for_reg, targets * pos_equal_one_for_reg, self.sigma) / \
             pos_equal_one_sum
         reg_loss = torch.sum(reg_loss)
@@ -340,7 +329,6 @@ class RPN3D(nn.Module):
             cls_neg_loss_rec,
         )
 
-
     def predict(self, data, probs, deltas, summary=False, visual=False):
 
         device = probs.device   
@@ -354,15 +342,14 @@ class RPN3D(nn.Module):
         batch_gt_boxes_3d = None 
 
         if summary or visual: 
-            batch_gt_boxes_3d = label_to_gt_box_3d(label, cls_name='Car', coordinate='lidar')
+            batch_gt_boxes_3d = label_to_gt_box_3d(
+                    label, cls_name='Car', coordinate='lidar')
 
         probs = probs.cpu().detach().numpy()
         deltas = deltas.cpu().detach().numpy()
-
         batch_boxes_3d = deltas_to_boxes_3d(deltas, self.anchors) 
         batch_boxes_2d = batch_boxes_3d[:, :, [0, 1, 4, 5, 6]] 
         batch_probs = probs.reshape((batch_size, -1))
-
         # NMS 
         ret_box_3d = []
         ret_score = []
@@ -411,7 +398,7 @@ class RPN3D(nn.Module):
                 birdview, ret_box_3d[0], batch_gt_boxes_3d[0], factor=4, 
                 P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
             
-            heatmap = colorize(probs[0, ...], 4)
+            heatmap = colorize(probs[0, ...], factor=4)
 
             ret_summary = [
                 ['predict/front_view_rgb', front_image[np.newaxis, ...]],
@@ -430,14 +417,14 @@ class RPN3D(nn.Module):
                 front_image = draw_lidar_box_3d_on_image(
                     rgb[i], ret_box_3d[i],  batch_gt_boxes_3d[i], 
                     P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
-
+                    
                 birdview = lidar_to_bird_view_image(raw_lidar[i], factor=4) 
                 birdview = draw_lidar_box_3d_on_birdview(
                     birdview, ret_box_3d[i], batch_gt_boxes_3d[i], factor=4, 
                     P2=P, T_VELO_2_CAM=Tr, R_RECT_0=R)
                 
-                heatmap = colorize(probs[i, ...], 4)
-
+                heatmap = colorize(probs[i, ...], factor=4)
+                
                 front_images.append(front_image)
                 bird_views.append(birdview)
                 heatmaps.append(heatmap)
