@@ -238,19 +238,16 @@ def main():
                             front_img_path = os.path.join(
                                 vis_output_dir, 
                                 str(epoch + 1), 
-                                'vis', 
                                 tag + '_front.jpg',
                             )
                             bird_view_path = os.path.join(
                                 vis_output_dir, 
                                 str(epoch + 1), 
-                                'vis', 
                                 tag + '_bv.jpg',
                             )
                             heatmap_path = os.path.join(
                                 vis_output_dir, 
                                 str(epoch + 1), 
-                                'vis', 
                                 tag + '_heatmap.jpg',
                             )
                             os.makedirs(
