@@ -675,7 +675,6 @@ def draw_lidar_box_3d_on_image(
         T_VELO_2_CAM = T_VELO_2_CAM, 
         R_RECT_0 = R_RECT_0,
     )
-    # TODO here is the problem 
     gt_projections = lidar_box3d_to_camera_box(
         gt_boxes_3d, 
         cal_projection = True, 
@@ -799,7 +798,7 @@ def lidar_to_bird_view(x, y, factor=1):
     return a, b 
 
 
-def colorize(value, factor=1, vmin=None, vmax=None):
+def colorize(value, factor=4, vmin=None, vmax=None):
     # normalize
     value = np.sum(value, axis=0)
     vmin = np.min(value) if vmin is None else vmin
@@ -809,7 +808,7 @@ def colorize(value, factor=1, vmin=None, vmax=None):
     value = (value * 255).astype(np.uint8)
     value = cv2.applyColorMap(value, cv2.COLORMAP_JET)
     value = cv2.cvtColor(value, cv2.COLOR_BGR2RGB)
-    w, h = value.shape
+    w, h, _ = value.shape
     value = cv2.resize(value, (int(w * factor), int(h * factor)))
 
     return value

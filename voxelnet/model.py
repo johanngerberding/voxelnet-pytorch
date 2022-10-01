@@ -25,6 +25,38 @@ from loss import smooth_L1_loss
 cfg = get_cfg_defaults()
 
 
+def filter_boxes(batch_size, batch_probs, batch_boxes_3d, batch_boxes_2d, device):
+    ret_box_3d = []
+    ret_score = []
+
+    for batch_id in range(batch_size):
+        # remove boxes with low scores 
+        idx = np.where(batch_probs[batch_id, :] >= cfg.RPN.SCORE_THRES)[0]
+        tmp_boxes_3d = batch_boxes_3d[batch_id, idx, ...]
+        tmp_boxes_2d = batch_boxes_2d[batch_id, idx, ...]
+        tmp_scores = batch_probs[batch_id, idx]
+
+        boxes_2d = corner_to_standup_box2d(
+            center_to_corner_box_2d(tmp_boxes_2d, coordinate='lidar')
+        )
+
+        idx, cnt = nms(
+            torch.from_numpy(boxes_2d).to(device), 
+            torch.from_numpy(tmp_scores).to(device), 
+            cfg.RPN.NMS_THRES, 
+            cfg.RPN.NMS_POST_TOPK,
+        )  
+
+        idx = idx[:cnt].cpu().detach().numpy()
+
+        tmp_boxes_3d = tmp_boxes_3d[idx, ...]
+        tmp_scores = tmp_scores[idx]
+        ret_box_3d.append(tmp_boxes_3d)
+        ret_score.append(tmp_scores)
+
+    return ret_box_3d, ret_score 
+
+
 class VFELayer(nn.Module):
     def __init__(self, cin: int, cout: int):
         super(VFELayer, self).__init__()
@@ -343,7 +375,7 @@ class RPN3D(nn.Module):
 
         if summary or visual: 
             batch_gt_boxes_3d = label_to_gt_box_3d(
-                    label, cls_name='Car', coordinate='lidar')
+                    label, cls_name=cfg.OBJECT.NAME, coordinate='lidar')
 
         probs = probs.cpu().detach().numpy()
         deltas = deltas.cpu().detach().numpy()
@@ -351,33 +383,8 @@ class RPN3D(nn.Module):
         batch_boxes_2d = batch_boxes_3d[:, :, [0, 1, 4, 5, 6]] 
         batch_probs = probs.reshape((batch_size, -1))
         # NMS 
-        ret_box_3d = []
-        ret_score = []
-
-        for batch_id in range(batch_size):
-            # remove boxes with low scores 
-            idx = np.where(batch_probs[batch_id, :] >= cfg.RPN.SCORE_THRES)[0]
-            tmp_boxes_3d = batch_boxes_3d[batch_id, idx, ...]
-            tmp_boxes_2d = batch_boxes_2d[batch_id, idx, ...]
-            tmp_scores = batch_probs[batch_id, idx]
-
-            boxes_2d = corner_to_standup_box2d(
-                center_to_corner_box_2d(tmp_boxes_2d, coordinate='lidar')
-            )
-
-            idx, cnt = nms(
-                torch.from_numpy(boxes_2d).to(device), 
-                torch.from_numpy(tmp_scores).to(device), 
-                cfg.RPN.NMS_THRES, 
-                cfg.RPN.NMS_POST_TOPK,
-            )  
-
-            idx = idx[:cnt].cpu().detach().numpy()
-
-            tmp_boxes_3d = tmp_boxes_3d[idx, ...]
-            tmp_scores = tmp_scores[idx]
-            ret_box_3d.append(tmp_boxes_3d)
-            ret_score.append(tmp_scores)
+        ret_box_3d, ret_score = filter_boxes(
+            batch_size, batch_probs, batch_boxes_3d, batch_boxes_2d, device)
 
         ret_box_3d_score = []
         for boxes_3d, scores in zip(ret_box_3d, ret_score):

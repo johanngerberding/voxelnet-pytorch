@@ -14,6 +14,11 @@ Take a look at the Kitti Dataset, especially the lidar and camera data and have 
 
 ![Lidar Pointcloud with bounding boxes](assets/pcl_data.gif)
 
+## TODOs 
+
+* load the model and make predictions -> script 
+* evaluation script in python or KITTI eval? 
+
 ## References 
 
 Here the helpful stuff I used:

@@ -62,7 +62,7 @@ def main():
     train_dataset = KITTIDataset(
         data_dir=train_data_dir, 
         shuffle=True, 
-        augment=True, 
+        augment=False, 
         test=False, 
     )
     print(f"Len Train Dataset: {len(train_dataset)}") 
